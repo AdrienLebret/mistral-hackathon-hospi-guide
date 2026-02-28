@@ -1,6 +1,7 @@
 # Kiro
 .kiro/*
-
+# Claude
+.claude/*
 # Python
 __pycache__/
 *.py[cod]
