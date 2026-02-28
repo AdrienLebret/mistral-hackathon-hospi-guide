@@ -1,150 +1,127 @@
 """
-HospiGuide — Multi-Agent Triage System (Hackathon Entry Point)
+Triastral — BidiAgent Voice Orchestrator Entry Point
 
-Demonstrates the Orchestrator Agent calling Agent 2 (DataGouv health
-enrichment) as a Strands @tool. Agents 1 and 3 are stubbed for now.
+Patient-facing voice conversation orchestrator for the Triastral emergency
+department triage assistant. Uses Amazon Nova Sonic 2 via the Strands SDK
+BidiAgent for real-time bidirectional audio streaming in French.
+
+The orchestrator delegates clinical pre-assessment to the Clinical Agent
+and health data enrichment to the DataGouv tool, then compiles a structured
+triage document with a CCMU classification recommendation for the nurse
+dashboard.
+
+Usage:
+    python backend/main.py
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import os
+from datetime import datetime, timezone
+from pathlib import Path
 
-from strands import Agent, tool
-from agents.datagouv_tool import query_health_data, _make_model
+from strands.experimental.bidi import BidiAgent
+from strands.experimental.bidi.io import BidiAudioIO, BidiTextIO
+from strands.experimental.bidi.models import BidiNovaSonicModel
+from strands.experimental.bidi.tools import stop_conversation
 
+from agents.clinical_agent import clinical_assessment
+from agents.datagouv_tool import query_health_data
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Agent 1 stub — Pre-Nurse Diagnostic
+# Configuration helpers
 # ---------------------------------------------------------------------------
 
-@tool
-def pre_nurse_diagnostic(patient_transcript: str) -> str:
-    """Conduct a structured clinical pre-assessment from the patient
-    conversation transcript using the OPQRST framework.
+PROMPT_PATH = Path(__file__).parent / "agents" / "prompts" / "orchestrator.md"
+OUTPUT_DIR = Path(__file__).parent / "output"
 
-    Args:
-        patient_transcript: The raw transcript of the patient conversation.
 
-    Returns:
-        A JSON string with clinical assessment, red flags, and suggested
-        CCMU level.
-    """
-    # TODO: Replace with full Strands agent once Agent 1 prompt is ready
-    return json.dumps({
-        "chief_complaint": "Douleur thoracique",
-        "opqrst": {
-            "onset": "Ce matin",
-            "provocation": "Effort physique",
-            "quality": "Oppression",
-            "region": "Thorax, irradiation bras gauche",
-            "severity": 7,
-            "timing": "Continu depuis 3h",
+def _load_prompt() -> str:
+    """Load orchestrator system prompt from markdown file."""
+    return PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def _make_nova_sonic_model() -> BidiNovaSonicModel:
+    """Create Nova Sonic 2 model with configurable voice and region."""
+    return BidiNovaSonicModel(
+        model_id=os.getenv("NOVA_SONIC_MODEL_ID", "amazon.nova-2-sonic-v1:0"),
+        provider_config={
+            "audio": {"voice": os.getenv("NOVA_SONIC_VOICE_ID", "tiffany")}
         },
-        "red_flags": ["chest_pain_with_dyspnea_and_diaphoresis"],
-        "medical_history": ["hypertension", "diabete_type_2"],
-        "medications": ["metformine_1000mg", "amlodipine_5mg"],
-        "allergies": [],
-        "suggested_ccmu": 4,
-        "status": "stub — agent 1 not yet implemented",
-    }, ensure_ascii=False, indent=2)
-
-
-# ---------------------------------------------------------------------------
-# Agent 3 stub — Administrative File Builder
-# ---------------------------------------------------------------------------
-
-@tool
-def build_admin_file(patient_info: str) -> str:
-    """Collect and structure the patient's administrative information for
-    hospital registration.
-
-    Args:
-        patient_info: Text with the patient's administrative details.
-
-    Returns:
-        A JSON string with administrative fields and completeness flag.
-    """
-    # TODO: Replace with full Strands agent once Agent 3 prompt is ready
-    return json.dumps({
-        "full_name": "Jean Dupont",
-        "date_of_birth": "1958-05-12",
-        "gender": "M",
-        "address": "12 rue de Rivoli, 75001 Paris",
-        "phone": "+33 6 12 34 56 78",
-        "insurance": {"carte_vitale": "1 58 05 75 XXX XXX XX", "mutuelle": "MGEN"},
-        "emergency_contact": {"name": "Marie Dupont", "relation": "Épouse", "phone": "+33 6 98 76 54 32"},
-        "attending_physician": "Dr Martin, Cabinet Rivoli",
-        "completeness": "complete",
-        "missing_fields": [],
-        "status": "stub — agent 3 not yet implemented",
-    }, ensure_ascii=False, indent=2)
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator Agent (AO)
-# ---------------------------------------------------------------------------
-
-ORCHESTRATOR_PROMPT = """Tu es l'Agent Orchestrateur (AO) de HospiGuide, un coordinateur d'accueil
-médical opérant aux urgences d'un hôpital français.
-
-Tu disposes de 3 outils correspondant à 3 agents spécialisés :
-1. pre_nurse_diagnostic — évaluation clinique pré-infirmière (Agent 1)
-2. query_health_data — enrichissement données de santé publique (Agent 2)
-3. build_admin_file — collecte administrative (Agent 3)
-
-## Processus
-1. Analyse le contexte patient reçu
-2. Appelle pre_nurse_diagnostic pour l'évaluation clinique
-3. En parallèle, appelle query_health_data pour l'enrichissement épidémiologique
-4. Appelle build_admin_file pour les données administratives
-5. Compile tout en un Document de Triage Patient avec classification CCMU
-
-## Classification CCMU
-- CCMU 1: Stable, aucune action nécessaire
-- CCMU 2: Stable, nécessite décision diagnostique/thérapeutique
-- CCMU 3: État instable sans menace vitale
-- CCMU 4: Pronostic vital engagé
-- CCMU 5: Menace vitale immédiate
-- CCMU P: Urgence psychiatrique
-- CCMU D: Décédé à l'arrivée
-
-## Format de sortie
-Retourne un JSON structuré combinant les sorties des 3 agents + ta recommandation CCMU avec raisonnement.
-"""
-
-
-def create_orchestrator() -> Agent:
-    return Agent(
-        model=_make_model(),
-        system_prompt=ORCHESTRATOR_PROMPT,
-        tools=[pre_nurse_diagnostic, query_health_data, build_admin_file],
+        client_config={"region": os.getenv("AWS_REGION", "us-east-1")},
     )
 
 
+def _save_triage_document(content: str) -> Path:
+    """Save triage document JSON to the output directory."""
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filepath = OUTPUT_DIR / f"triage_{ts}.json"
+    try:
+        parsed = json.loads(content)
+        filepath.write_text(
+            json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except (json.JSONDecodeError, ValueError):
+        filepath = OUTPUT_DIR / f"triage_{ts}.txt"
+        filepath.write_text(content, encoding="utf-8")
+    logger.info("📄 Triage document saved to %s", filepath)
+    return filepath
+
+
 # ---------------------------------------------------------------------------
-# Quick test
+# Voice session
 # ---------------------------------------------------------------------------
+
+
+async def main() -> None:
+    """Initialize and run the voice conversation session."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    logger.info("=" * 60)
+    logger.info("🚀 Triastral Voice Orchestrator starting")
+    logger.info("=" * 60)
+    logger.info(
+        "Model: %s", os.getenv("NOVA_SONIC_MODEL_ID", "amazon.nova-2-sonic-v1:0")
+    )
+    logger.info("Voice: %s", os.getenv("NOVA_SONIC_VOICE_ID", "tiffany"))
+    logger.info("Region: %s", os.getenv("AWS_REGION", "us-east-1"))
+    logger.info("Tools: clinical_assessment, query_health_data, stop_conversation")
+    logger.info("-" * 60)
+
+    model = _make_nova_sonic_model()
+
+    agent = BidiAgent(
+        model=model,
+        system_prompt=_load_prompt(),
+        tools=[clinical_assessment, query_health_data, stop_conversation],
+    )
+
+    audio_io = BidiAudioIO()
+    text_io = BidiTextIO()
+
+    try:
+        await agent.run(
+            inputs=[audio_io.input()],
+            outputs=[audio_io.output(), text_io.output()],
+        )
+    except Exception:
+        logger.exception("Voice session error — connection lost or interrupted")
+    finally:
+        # Try to capture any triage document from the conversation
+        logger.info("=" * 60)
+        logger.info("🏁 Voice session ended")
+        logger.info("=" * 60)
+
 
 if __name__ == "__main__":
-    patient_scenario = """
-    Un homme de 67 ans se présente aux urgences de l'Hôpital Necker (Paris 75).
-    Il se plaint d'une douleur thoracique oppressante depuis ce matin, qui
-    irradie vers le bras gauche. Il est essoufflé et en sueur.
-    Antécédents : hypertension artérielle, diabète de type 2.
-    Médicaments : Metformine 1000mg, Amlodipine 5mg.
-    Pas d'allergies connues.
-    Accompagné par son épouse Marie Dupont.
-    """
-
-    print("=" * 60)
-    print("HospiGuide — Orchestrator Agent")
-    print("=" * 60)
-    print(f"\nScénario patient:\n{patient_scenario.strip()}\n")
-    print("-" * 60)
-
-    orchestrator = create_orchestrator()
-    result = orchestrator(patient_scenario)
-    print("\n" + "=" * 60)
-    print("Résultat du triage:")
-    print("=" * 60)
-    print(result)
+    asyncio.run(main())

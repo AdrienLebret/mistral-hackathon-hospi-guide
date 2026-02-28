@@ -2,19 +2,20 @@
 
 ## 1. System Overview
 
-Triastral is a multi-agent AI system designed to accelerate emergency department intake and support triage decision-making. The system operates across two user interfaces (patient kiosk and nurse dashboard) connected to a Python backend powered by **Strands Agents SDK** that orchestrates multiple AI agents locally using Mistral models directly.
+Triastral is a multi-agent AI system designed to accelerate emergency department intake and support triage decision-making. The system uses a **voice-first kiosk** powered by **Amazon Nova Sonic 2** for real-time bidirectional audio streaming, orchestrated by the **Strands Agents SDK** `BidiAgent`. Sub-agents run on **Mistral Large** via Amazon Bedrock, and public health data enrichment is provided by the **MCP Data.gouv** connector.
 
 ### Design Principles
-- **Voice-first**: The patient interacts primarily through speech, reducing friction
+- **Voice-first**: The patient interacts through real-time speech via Nova Sonic 2 — no separate STT/TTS pipeline needed
 - **Data separation**: Clinical and administrative data live in isolated stores
 - **Agent specialization**: Each agent has a single responsibility, orchestrated by a supervisor
-- **Local-first**: Agents run locally via Strands SDK — no managed orchestration service required
+- **Agents as Tools**: Sub-agents are `@tool` functions wrapping `strands.Agent` instances, called by the orchestrator
 - **Real-time**: The nurse dashboard updates in real-time as new patients complete intake
 - **Decision support, not replacement**: The system recommends a CCMU level; the nurse always has final authority
+- **Information boundary**: CCMU levels, red flags, and clinical assessments are never communicated to the patient
 
 ---
 
-## 2. Patient Journey (Pathway 1)
+## 2. Patient Journey
 
 ```
 Patient Arrives
@@ -28,660 +29,281 @@ Patient Arrives
 ┌──────────────────────────────────────────────────────────┐
 │              VOICE CONVERSATION (3-5 minutes)            │
 │                                                           │
-│  ElevenLabs Agent ◄─────► Orchestrator Agent (AO)        │
-│       ▲                          │                        │
-│       │                    ┌─────┼─────┐                  │
-│  Voxtral STT               │     │     │                  │
-│  (transcription)        Agent1 Agent2 Agent3              │
-│                         Diag   Data   Admin               │
+│  Microphone ◄─────► BidiAgent (Nova Sonic 2)             │
+│  Speaker              │                                   │
+│                  ┌────┼────┐                              │
+│                  │         │                              │
+│            Agent 1    Agent 2                             │
+│            Clinical   DataGouv                            │
+│            (Mistral)  (Mistral + MCP)                    │
 └──────────────────────────────────────────────────────────┘
          │
          ▼
 ┌──────────────────┐
-│  QR Code Screen  │  Patient photographs QR → joins waiting room
-└──────────────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Waiting Room    │  Patient checks queue position via QR link
-└──────────────────┘
-         │
-         ▼
-┌──────────────────┐
-│  Nurse calls     │  Patient proceeds to triage zone
-│  patient         │
+│  Triage Document │  JSON sent to nurse dashboard
+│  Generated       │
 └──────────────────┘
 ```
 
 ---
 
-## 3. Agent Architecture (Detail)
+## 3. Agent Architecture
 
 ### Architecture Pattern: Agents as Tools (Strands SDK)
 
-Triastral uses the **"Agents as Tools"** pattern from Strands Agents SDK. Each specialized agent is wrapped as a `@tool` function and provided to the Orchestrator Agent. The orchestrator decides when to delegate to each specialist based on the conversation flow.
+Triastral uses the **"Agents as Tools"** pattern from Strands Agents SDK. The Orchestrator is a `BidiAgent` using Nova Sonic 2 for voice. Sub-agents are `@tool` functions provided to the BidiAgent tools list.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│              ORCHESTRATOR AGENT (AO)                  │
-│         Strands Agent + Mistral Large                 │
+│           ORCHESTRATOR (BidiAgent)                    │
+│         Amazon Nova Sonic 2                           │
+│         Real-time voice conversation                  │
 │                                                       │
 │  tools=[                                              │
-│    pre_nurse_diagnostic,    # Agent 1 (@tool)         │
-│    datagouv_health_data,    # Agent 2 (@tool + MCP)   │
-│    admin_file_builder,      # Agent 3 (@tool)         │
+│    clinical_assessment,     # Agent 1 (@tool)         │
+│    query_health_data,       # Agent 2 (@tool + MCP)   │
+│    stop_conversation,       # End session             │
 │  ]                                                    │
 └─────────────────────────────────────────────────────┘
 ```
 
-### 3.1 Orchestrator Agent (AO)
+### 3.1 Orchestrator Agent (`backend/main.py`)
 
-**Runtime**: Strands Agents SDK (local Python process)
-**Model**: Mistral Large (via `MistralModel`)
-**Role**: Conversation manager and agent coordinator
+**Runtime**: Strands Agents SDK — `BidiAgent` (experimental bidi module)
+**Model**: Amazon Nova Sonic 2 (`amazon.nova-2-sonic-v1:0`) via `BidiNovaSonicModel`
+**Role**: Voice conversation manager and agent coordinator
 
 **Implementation**:
 ```python
-from strands import Agent
-from strands.models.mistral import MistralModel
+from strands.experimental.bidi import BidiAgent
+from strands.experimental.bidi.models import BidiNovaSonicModel
+from strands.experimental.bidi.io import BidiAudioIO, BidiTextIO
+from strands.experimental.bidi.tools import stop_conversation
 
-orchestrator = Agent(
-    system_prompt=AO_SYSTEM_PROMPT,
-    model=MistralModel(model_id="mistral-large-latest"),
-    tools=[pre_nurse_diagnostic, datagouv_health_data, admin_file_builder],
+model = BidiNovaSonicModel(
+    model_id="amazon.nova-2-sonic-v1:0",
+    provider_config={"audio": {"voice": "tiffany"}},
+    client_config={"region": "us-east-1"},
+)
+
+agent = BidiAgent(
+    model=model,
+    system_prompt=_load_prompt(),  # from backend/agents/prompts/orchestrator.md
+    tools=[clinical_assessment, query_health_data, stop_conversation],
 )
 ```
 
-**Responsibilities**:
-1. Drive the intake conversation through a structured flow:
-   - Greeting & consent
-   - Chief complaint identification
-   - Symptom deep-dive (delegated to Agent 1)
-   - Administrative data collection (delegated to Agent 3)
-   - DataGouv enrichment (delegated to Agent 2)
-2. Compile all sub-agent outputs into a unified **Patient Triage Document**
-3. Apply CCMU classification logic based on the aggregated data
-4. Push the final document to the database + nurse dashboard
-5. Trigger QR code generation for the patient
-
-**Conversation Flow Logic**:
+**Conversation Flow**:
 ```
-START → Greeting
-  → Ask chief complaint (free-form)
-  → DELEGATE to Agent 1 (clinical questions based on complaint)
-  → DELEGATE to Agent 3 (admin data: name, DOB, insurance, meds, allergies)
-  → DELEGATE to Agent 2 (background enrichment — async, non-blocking)
-  → Summarize & confirm with patient
-  → Generate triage document
-  → Generate QR code
-→ END
+Greeting & consent
+  → Chief complaint identification
+  → Clinical questions (one at a time)
+  → DELEGATE to clinical_assessment (Agent 1)
+  → DELEGATE to query_health_data (Agent 2)
+  → Factual summary & confirmation with patient
+  → Compile triage document (nurse-only JSON)
+  → stop_conversation
 ```
 
-### 3.2 Agent 1 — Pre-Nurse Diagnostic
+**Configuration (environment variables)**:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NOVA_SONIC_MODEL_ID` | `amazon.nova-2-sonic-v1:0` | Nova Sonic model ID |
+| `NOVA_SONIC_VOICE_ID` | `tiffany` | Voice for speech synthesis |
+| `AWS_REGION` | `us-east-1` | AWS region for Bedrock |
 
-**Model**: Mistral Large (via `MistralModel`)
-**Role**: Clinical pre-assessment specialist
+### 3.2 Agent 1 — Clinical Pre-Assessment (`backend/agents/clinical_agent.py`)
+
+**Model**: Mistral Large (`mistral.mistral-large-3-675b-instruct`) via `BedrockModel`
+**Role**: Clinical pre-assessment specialist using OPQRST framework
 
 **Implementation**:
 ```python
-from strands import Agent, tool
-from strands.models.mistral import MistralModel
-
 @tool
-def pre_nurse_diagnostic(patient_context: str) -> str:
-    """Conduct a structured clinical pre-assessment based on patient context.
-
-    Args:
-        patient_context: The patient's chief complaint and conversation so far.
-    """
-    agent = Agent(
-        system_prompt=AGENT1_SYSTEM_PROMPT,
-        model=MistralModel(model_id="mistral-large-latest"),
-    )
+def clinical_assessment(patient_context: str) -> str:
+    """Conduct structured clinical pre-assessment using OPQRST framework."""
+    agent = Agent(model=_make_model(), system_prompt=_load_prompt())
     response = agent(patient_context)
-    return str(response)
+    return str(response)  # JSON string
 ```
-
-**Behavior**:
-- Follows a symptom-driven interview protocol
-- Adapts questions based on the chief complaint
-- Covers: onset, duration, severity (0-10), location, character, aggravating/alleviating factors, associated symptoms
-- Asks about: medical history, surgical history, current medications, allergies
-- Flags emergency red flags (chest pain + dyspnea, neurological deficits, etc.)
 
 **Output** (structured JSON):
 ```json
 {
-  "chief_complaint": "Severe chest pain",
-  "symptom_assessment": {
-    "onset": "2 hours ago",
-    "severity": 8,
-    "character": "Crushing, pressure-like",
-    "location": "Central chest, radiating to left arm",
-    "associated_symptoms": ["Shortness of breath", "Nausea", "Diaphoresis"],
-    "aggravating_factors": ["Exertion"],
-    "alleviating_factors": ["Rest (partial)"]
+  "chief_complaint": "Douleur thoracique oppressante",
+  "opqrst": {
+    "onset": "Ce matin, au réveil",
+    "provocation": "Effort physique",
+    "quality": "Oppression, serrement",
+    "region": "Thorax, irradiation bras gauche",
+    "severity": 7,
+    "timing": "Continu depuis 3h"
   },
-  "medical_history": ["Hypertension", "Type 2 Diabetes"],
-  "current_medications": ["Metformin 500mg", "Amlodipine 5mg"],
-  "allergies": ["Penicillin"],
-  "red_flags": ["Chest pain with radiation", "Diaphoresis", "Cardiovascular risk factors"],
-  "preliminary_assessment": "Presentation concerning for acute coronary syndrome. Recommend immediate evaluation.",
-  "suggested_ccmu": "CCMU 4"
+  "medical_history": ["hypertension", "diabete_type_2"],
+  "medications": ["metformine_1000mg", "amlodipine_5mg"],
+  "allergies": [],
+  "red_flags": ["chest_pain_with_dyspnea_and_diaphoresis"],
+  "suggested_ccmu": "4",
+  "ccmu_reasoning": "Douleur thoracique avec irradiation et facteurs de risque cardiovasculaire",
+  "is_urgent": true
 }
 ```
 
-### 3.3 Agent 2 — DataGouv Health Data Tool
+**Error handling**: On agent failure, returns error JSON with `"suggested_ccmu": "3"` (cautious default).
 
-**Model**: Mistral Medium (via `MistralModel`)
-**Role**: Public health data enrichment
-**Tools**: MCP Data.gouv connector (via Strands `MCPClient`)
+### 3.3 Agent 2 — DataGouv Health Data Tool (`backend/agents/datagouv_tool.py`)
 
-**Implementation**:
-```python
-from strands import Agent, tool
-from strands.models.mistral import MistralModel
-from strands.tools.mcp import MCPClient
-from mcp import stdio_client, StdioServerParameters
-
-datagouv_mcp = MCPClient(lambda: stdio_client(
-    StdioServerParameters(command="uvx", args=["datagouv-mcp-server"])
-))
-
-@tool
-def datagouv_health_data(clinical_context: str) -> str:
-    """Query public health datasets to enrich patient clinical context with epidemiological data.
-
-    Args:
-        clinical_context: Patient clinical profile for cross-referencing with health data.
-    """
-    agent = Agent(
-        system_prompt=AGENT2_SYSTEM_PROMPT,
-        model=MistralModel(model_id="mistral-medium-latest"),
-        tools=[datagouv_mcp],
-    )
-    response = agent(clinical_context)
-    return str(response)
-```
+**Model**: Mistral Large (`mistral.mistral-large-3-675b-instruct`) via `BedrockModel`
+**Role**: Public health data enrichment via MCP
+**MCP Server**: `https://mcp.data.gouv.fr/mcp` (streamable HTTP transport)
 
 **Behavior**:
-- Receives the patient's clinical context from AO
-- Queries relevant Data.gouv datasets via MCP:
-  - Pathology prevalence in the patient's department
-  - Known comorbidity patterns for identified conditions
-  - Medication interactions (BDPM database)
+- Queries data.gouv.fr datasets via MCP for:
+  - Pathology prevalence by department/age
+  - Medication interactions (BDPM)
   - Local facility capabilities (FINESS)
-- Returns a contextual enrichment report
+  - Epidemiological alerts
+- Returns contextual enrichment report as JSON
 
-**MCP Tool Calls**:
-```python
-# Example MCP queries (executed by the agent via MCPClient)
-mcp.query("pathologies_prevalence", {
-    "department": "75",  # Paris
-    "pathology_group": "cardiovascular",
-    "age_range": "50-65"
-})
+---
 
-mcp.query("comorbidity_associations", {
-    "primary_condition": "hypertension",
-    "secondary_conditions": ["diabetes_type2"]
-})
+## 4. Models Called During a Conversation
 
-mcp.query("bdpm_interactions", {
-    "medications": ["metformin", "amlodipine"]
-})
-```
+| Step | Model | Provider | Purpose |
+|------|-------|----------|---------|
+| Voice conversation | `amazon.nova-2-sonic-v1:0` (Nova Sonic 2) | Amazon Bedrock | Real-time speech-to-speech, tool orchestration |
+| Clinical assessment | `mistral.mistral-large-3-675b-instruct` (Mistral Large) | Amazon Bedrock | OPQRST analysis, red flags, CCMU suggestion |
+| DataGouv enrichment | `mistral.mistral-large-3-675b-instruct` (Mistral Large) | Amazon Bedrock | MCP queries to data.gouv.fr |
 
-**Output** (structured JSON):
+---
+
+## 5. Triage Document (Orchestrator Output)
+
+The final JSON document generated for the nurse dashboard. Never exposed to the patient.
+
 ```json
 {
-  "prevalence_context": "Cardiovascular pathologies affect 12.3% of the 50-65 age group in department 75",
-  "comorbidity_flags": "Hypertension + Type 2 Diabetes strongly associated with cardiovascular events (OR: 2.4)",
-  "medication_notes": "No major interactions between Metformin and Amlodipine",
-  "facility_note": "Current facility equipped for cardiac emergencies (FINESS category: CHU)",
-  "data_sources": ["cnam_pathologies_2024", "bdpm_v3", "finess_2024"]
-}
-```
-
-> **Note**: DataGouv data is macro-level (population statistics). Its value is contextual enrichment, not individual diagnosis. The agent must clearly label this as statistical context.
-
-### 3.4 Agent 3 — Administrative File Builder
-
-**Model**: Mistral Medium (via `MistralModel`)
-**Role**: Administrative data collector
-
-**Implementation**:
-```python
-from strands import Agent, tool
-from strands.models.mistral import MistralModel
-
-@tool
-def admin_file_builder(conversation_context: str) -> str:
-    """Collect and structure patient administrative data (identity, insurance, contacts).
-
-    Args:
-        conversation_context: The conversation so far to extract admin data from.
-    """
-    agent = Agent(
-        system_prompt=AGENT3_SYSTEM_PROMPT,
-        model=MistralModel(model_id="mistral-medium-latest"),
-    )
-    response = agent(conversation_context)
-    return str(response)
-```
-
-**Behavior**:
-- Collects structured administrative information through conversation:
-  - Full name, date of birth, gender
-  - Address, phone number
-  - Insurance info (Carte Vitale number, mutuelle)
-  - Emergency contact
-  - Attending physician (médecin traitant)
-- Validates completeness and flags missing fields
-- Stores data in the Admin database table
-
-**Output** (structured JSON):
-```json
-{
-  "patient_id": "PAT-20260228-001",
-  "full_name": "Jean Dupont",
-  "date_of_birth": "1972-05-14",
-  "gender": "M",
-  "address": "42 Rue de la Santé, 75013 Paris",
-  "phone": "+33612345678",
-  "insurance": {
-    "carte_vitale": "1720575XXXXX",
-    "mutuelle": "MGEN",
-    "mutuelle_number": "XXXXX"
+  "patient_chief_complaint": "Douleur thoracique oppressante depuis ce matin",
+  "clinical_assessment": {
+    "opqrst": { "onset": "...", "provocation": "...", "quality": "...", "region": "...", "severity": 7, "timing": "..." },
+    "red_flags": ["chest_pain_with_dyspnea_and_diaphoresis"],
+    "medical_history": ["hypertension", "diabete_type_2"],
+    "medications": ["metformine_1000mg", "amlodipine_5mg"],
+    "allergies": []
   },
-  "emergency_contact": {
-    "name": "Marie Dupont",
-    "relation": "Spouse",
-    "phone": "+33698765432"
+  "datagouv_context": {
+    "epidemiological_context": {},
+    "medication_context": {},
+    "facility_context": {},
+    "summary": "Résumé narratif pour l'infirmier(ère)"
   },
-  "attending_physician": "Dr. Martin, Cabinet Médical Mouffetard",
-  "data_complete": true,
-  "missing_fields": []
+  "recommended_ccmu": "4",
+  "ccmu_reasoning": "Douleur thoracique avec irradiation et facteurs de risque cardiovasculaire",
+  "data_quality_notes": null,
+  "timestamp": "2026-02-28T14:32:00Z"
 }
 ```
 
 ---
 
-## 4. Patient Triage Document (AO Output)
+## 6. CCMU Classification Logic
 
-The final document generated by the Orchestrator Agent:
+Implemented in `backend/triage.py` and in the orchestrator system prompt:
 
 ```
-╔══════════════════════════════════════════════════════════╗
-║           PATIENT TRIAGE DOCUMENT — Triastral            ║
-╠══════════════════════════════════════════════════════════╣
-║                                                          ║
-║  Patient: Jean Dupont (M, 53 yo)                        ║
-║  Session: PAT-20260228-001                              ║
-║  Arrival: 2026-02-28 14:32                              ║
-║                                                          ║
-║  ┌─────────────────────────────────────────────────┐    ║
-║  │  RECOMMENDED CCMU: ████ CCMU 4 — CRITICAL ████ │    ║
-║  │  Life-threatening prognosis engaged              │    ║
-║  └─────────────────────────────────────────────────┘    ║
-║                                                          ║
-║  CHIEF COMPLAINT                                         ║
-║  Severe crushing chest pain (8/10) for 2 hours,         ║
-║  radiating to left arm, with dyspnea and nausea.        ║
-║                                                          ║
-║  CLINICAL PRE-ASSESSMENT (Agent 1)                      ║
-║  • Onset: 2h ago during physical exertion               ║
-║  • Red flags: chest pain + radiation + diaphoresis      ║
-║  • Hx: HTN, T2DM — significant cardiovascular risk     ║
-║  • Current meds: Metformin 500mg, Amlodipine 5mg       ║
-║  • Allergy: Penicillin                                  ║
-║  • Assessment: Concerning for acute coronary syndrome   ║
-║                                                          ║
-║  HEALTH DATA CONTEXT (Agent 2 — Data.gouv)              ║
-║  • CV pathology prevalence 50-65yo in dept 75: 12.3%   ║
-║  • HTN+T2DM comorbidity: OR 2.4 for CV events          ║
-║  • No medication interactions flagged                    ║
-║  • Facility equipped for cardiac emergencies            ║
-║                                                          ║
-║  ADMINISTRATIVE (Agent 3)                                ║
-║  • Insurance: Carte Vitale ✓ | Mutuelle: MGEN ✓        ║
-║  • Emergency contact: Marie Dupont (spouse)             ║
-║  • Médecin traitant: Dr. Martin                         ║
-║                                                          ║
-║  PATIENT TRANSCRIPT SUMMARY                              ║
-║  [Condensed transcript of the voice conversation]        ║
-║                                                          ║
-║  AO RECOMMENDATION                                      ║
-║  "Patient presents with classic ACS symptoms on a       ║
-║  background of significant cardiovascular risk factors.  ║
-║  Recommend immediate cardiac evaluation. CCMU 4."       ║
-║                                                          ║
-╚══════════════════════════════════════════════════════════╝
+IF red_flags with immediate-death-risk indicators → CCMU 5
+ELSE IF red_flags present (no immediate death risk) → CCMU 4
+ELSE IF psychiatric indicators → CCMU P
+ELSE IF unstable without life threat → CCMU 3
+ELSE IF stable, requires diagnostic/therapeutic decision → CCMU 2
+ELSE IF stable, no action needed → CCMU 1
 ```
 
 ---
 
-## 5. Infrastructure
+## 7. Module Layout
 
-### 5.1 Backend (Local — Strands Agents)
+```
+backend/
+├── main.py                          # Entry point — async main, BidiAgent setup
+├── triage.py                        # CCMU classification + triage document compilation
+├── agents/
+│   ├── clinical_agent.py            # Agent 1 — Clinical pre-assessment (@tool)
+│   ├── datagouv_tool.py             # Agent 2 — DataGouv MCP enrichment (@tool, existing)
+│   └── prompts/
+│       ├── orchestrator.md          # Orchestrator system prompt (French)
+│       ├── clinical.md              # Clinical Agent system prompt (French)
+│       └── datagouv.md              # DataGouv Agent system prompt (existing)
+├── output/                          # Triage document JSON files (generated at runtime)
+├── api/                             # FastAPI routes (not yet implemented)
+└── persistence/                     # Database layer (not yet implemented)
+```
+
+---
+
+## 8. Infrastructure
+
+### 8.1 Backend
 
 | Component | Technology | Role |
 |-----------|-----------|------|
-| **Agent Runtime** | Strands Agents SDK (Python) | Multi-agent orchestration via "Agents as Tools" pattern |
-| **Model Provider** | Mistral AI API (`MistralModel`) | LLM inference — Mistral Large & Medium directly |
-| **MCP Integration** | Strands `MCPClient` + stdio transport | Data.gouv public health data enrichment |
-| **API Server** | FastAPI | REST API for frontend-backend communication |
-| **WebSocket** | FastAPI WebSocket | Real-time nurse dashboard updates |
+| **Agent Runtime** | Strands Agents SDK — `BidiAgent` | Voice orchestration via Nova Sonic 2 |
+| **Model Provider** | Amazon Bedrock | Nova Sonic 2 + Mistral Large |
+| **MCP Integration** | Strands `MCPClient` + streamable HTTP | Data.gouv.fr public health data |
+| **API Server** | FastAPI (planned) | REST API for frontend-backend communication |
 
-### 5.2 Storage (AWS)
+### 8.2 Storage (AWS — planned)
 
 | Service | Use |
 |---------|-----|
 | **DynamoDB — Admin Table** | Administrative patient data |
 | **DynamoDB — Clinical Table** | Clinical data (KMS encrypted, restricted access) |
 | **DynamoDB — Queue Table** | Patient queue state, positions, statuses |
-| **S3** | Triage document storage (PDF exports), session transcripts |
 
-### 5.3 Security
+### 8.3 Environment Variables
 
-| Service | Use |
-|---------|-----|
-| **AWS KMS** | Encryption keys for clinical data |
-| **IAM Policies** | Strict separation between admin and clinical data access |
-| **Cognito** | Nurse dashboard authentication |
-
-### 5.4 Frontend Hosting
-
-| Service | Use |
-|---------|-----|
-| **AWS Amplify** or **S3 + CloudFront** | Host both React apps |
-
-### 5.5 Infrastructure Diagram
-
-```
-                    ┌─────────────┐
-                    │  CloudFront │
-                    └──────┬──────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼                          ▼
-     ┌─────────────┐           ┌─────────────┐
-     │  S3 Bucket  │           │  S3 Bucket  │
-     │  Patient    │           │  Nurse      │
-     │  Kiosk App  │           │  Dashboard  │
-     └─────────────┘           └─────────────┘
-              │                          │
-              └────────────┬─────────────┘
-                           ▼
-              ┌──────────────────────┐
-              │  FastAPI Backend     │
-              │  (REST + WebSocket)  │
-              └──────────┬───────────┘
-                         │
-          ┌──────────────┼──────────────┐
-          ▼              ▼               ▼
-   ┌────────────┐ ┌────────────┐ ┌────────────┐
-   │  Session   │ │  QR Code   │ │  Queue     │
-   │  Manager   │ │  Generator │ │  Manager   │
-   └──────┬─────┘ └────────────┘ └──────┬─────┘
-          │                              │
-          ▼                              ▼
-   ┌─────────────────────────────────────────────┐
-   │     Strands Agents SDK (Local Python)        │
-   │                                              │
-   │   AO (Mistral Large)                         │
-   │     ├── @tool pre_nurse_diagnostic           │
-   │     │         (Mistral Large)                │
-   │     ├── @tool datagouv_health_data           │
-   │     │         (Mistral Medium + MCPClient)   │
-   │     │              └── MCP Data.gouv Server  │
-   │     └── @tool admin_file_builder             │
-   │               (Mistral Medium)               │
-   └───────────────────┬─────────────────────────┘
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼             ▼
-   ┌──────────┐ ┌──────────┐ ┌──────────┐
-   │ DynamoDB │ │ DynamoDB │ │ DynamoDB │
-   │ Admin    │ │ Clinical │ │ Queue    │
-   │ Table    │ │ Table    │ │ Table    │
-   │          │ │ (KMS)    │ │          │
-   └──────────┘ └──────────┘ └──────────┘
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NOVA_SONIC_MODEL_ID` | `amazon.nova-2-sonic-v1:0` | Nova Sonic model for orchestrator |
+| `NOVA_SONIC_VOICE_ID` | `tiffany` | Voice ID for speech synthesis |
+| `AWS_REGION` | `us-east-1` | AWS region for all Bedrock calls |
+| `BEDROCK_MODEL_ID` | `mistral.mistral-large-3-675b-instruct` | Model for Clinical Agent and DataGouv tool |
+| `DATAGOUV_MCP_URL` | `https://mcp.data.gouv.fr/mcp` | MCP Data.gouv endpoint |
 
 ---
 
-## 6. Frontend Specifications
+## 9. What's Implemented vs Planned
 
-### 6.1 Patient Kiosk
-
-**Screen Flow**:
-1. **Welcome Screen** — Hospital branding, "Tap to begin" button, language selector (FR/EN)
-2. **Voice Conversation Screen** — Animated waveform, live transcript, "I'm listening..." indicator
-3. **Summary Screen** — Brief recap of collected info, "Confirm" button
-4. **QR Code Screen** — Large QR code, estimated wait time, "You are #X in queue"
-
-**Key UX Requirements**:
-- Large touch targets (kiosk context)
-- High contrast, accessible design
-- Clear audio feedback
-- Simple, calming visuals (reduce patient anxiety)
-- Auto-timeout after inactivity
-
-### 6.2 Nurse Dashboard
-
-**Layout**:
-```
-┌──────────────────────────────────────────────────────┐
-│  Triastral — Nurse Dashboard            [Nurse Name] │
-├──────────────────────────────────────────────────────┤
-│                                                       │
-│  ┌─────────────────────┐  ┌────────────────────────┐ │
-│  │   PATIENT QUEUE     │  │   PATIENT DETAIL       │ │
-│  │                     │  │                         │ │
-│  │  🔴 CCMU 4 — Dupont │  │  Full triage document  │ │
-│  │  14:32 | Chest pain │  │  for selected patient   │ │
-│  │  [CALL PATIENT]     │  │                         │ │
-│  │                     │  │  - Clinical assessment  │ │
-│  │  🟠 CCMU 3 — Martin │  │  - DataGouv context     │ │
-│  │  14:28 | Abdominal  │  │  - Admin data           │ │
-│  │                     │  │  - Transcript summary   │ │
-│  │  🟡 CCMU 2 — Leroy  │  │  - AO recommendation   │ │
-│  │  14:15 | Knee injury│  │                         │ │
-│  │                     │  │  [VALIDATE CCMU]        │ │
-│  │  🟢 CCMU 1 — Petit  │  │  [OVERRIDE CCMU]       │ │
-│  │  14:02 | Follow-up  │  │  [CALL PATIENT]         │ │
-│  │                     │  │                         │ │
-│  └─────────────────────┘  └────────────────────────┘ │
-└──────────────────────────────────────────────────────┘
-```
-
-**Key Features**:
-- Auto-sorted by CCMU severity (highest first), then by arrival time
-- Color-coded severity badges (🔴 red = CCMU 4-5, 🟠 orange = CCMU 3, 🟡 yellow = CCMU 2, 🟢 green = CCMU 1)
-- Real-time new patient notifications
-- Click to expand full triage document
-- "Call Patient" button updates patient's QR code page
-- Nurse can validate or override AI-suggested CCMU level
+- ✅ Orchestrator Agent — BidiAgent with Nova Sonic 2 voice conversation
+- ✅ Agent 1 (Clinical Pre-Assessment) — full OPQRST + red flags + CCMU suggestion
+- ✅ Agent 2 (DataGouv MCP enrichment) — full implementation
+- ✅ CCMU classification logic (`backend/triage.py`)
+- ✅ French system prompts for orchestrator and clinical agent
+- ✅ Structured logging for tool calls and session lifecycle
+- 🔲 Agent 3 (Admin File Builder) — not yet implemented
+- 🔲 FastAPI API layer
+- 🔲 DynamoDB persistence layer
+- 🔲 Frontend apps (patient kiosk + nurse dashboard)
+- 🔲 QR code generation + patient queue tracking
 
 ---
 
-## 7. ElevenLabs Integration
-
-### Voice Agent Configuration
-
-The patient kiosk uses ElevenLabs Conversational AI to create a natural voice interaction:
-
-```javascript
-// ElevenLabs agent configuration
-const agentConfig = {
-  agent_id: "triastral-intake",
-  voice: {
-    voice_id: "professional_french_female",  // Warm, reassuring voice
-    model: "eleven_turbo_v2",
-    stability: 0.7,
-    similarity_boost: 0.8
-  },
-  conversation: {
-    first_message: "Bonjour et bienvenue aux urgences. Je suis là pour recueillir quelques informations avant votre prise en charge. Pouvez-vous me dire ce qui vous amène aujourd'hui ?",
-    language: "fr"
-  }
-};
-```
-
-### Voice ↔ Agent Pipeline
-
-```
-Patient speaks
-    │
-    ▼
-ElevenLabs captures audio
-    │
-    ▼
-Voxtral (Mistral STT) transcribes
-    │
-    ▼
-Transcript sent to AO (Strands Agent, local)
-    │
-    ▼
-AO generates response text
-    │
-    ▼
-ElevenLabs TTS speaks the response
-    │
-    ▼
-Patient hears and responds
-    │
-    (loop until conversation complete)
-```
-
----
-
-## 8. Data Models
-
-### 8.1 Admin Table (DynamoDB)
-
-```
-Table: triastral-admin
-Partition Key: patient_id (String)
-Sort Key: session_timestamp (String)
-
-Attributes:
-- full_name (String)
-- date_of_birth (String)
-- gender (String)
-- address (String)
-- phone (String)
-- insurance_type (String)
-- insurance_number (String)
-- mutuelle (String)
-- emergency_contact_name (String)
-- emergency_contact_phone (String)
-- attending_physician (String)
-- created_at (String - ISO 8601)
-```
-
-### 8.2 Clinical Table (DynamoDB — KMS Encrypted)
-
-```
-Table: triastral-clinical
-Partition Key: patient_id (String)
-Sort Key: session_timestamp (String)
-
-Attributes:
-- chief_complaint (String)
-- symptom_assessment (Map)
-- medical_history (List<String>)
-- surgical_history (List<String>)
-- current_medications (List<String>)
-- allergies (List<String>)
-- red_flags (List<String>)
-- preliminary_assessment (String)
-- datagouv_context (Map)
-- suggested_ccmu (String)
-- final_ccmu (String - set by nurse)
-- triage_document (String - full document JSON)
-- transcript_summary (String)
-- created_at (String - ISO 8601)
-```
-
-### 8.3 Queue Table (DynamoDB)
-
-```
-Table: triastral-queue
-Partition Key: facility_id (String)
-Sort Key: patient_id (String)
-
-Attributes:
-- queue_position (Number)
-- ccmu_level (String)
-- status (String: "waiting" | "called" | "in_triage" | "completed")
-- arrival_time (String - ISO 8601)
-- called_time (String - ISO 8601, nullable)
-- qr_code_url (String)
-- created_at (String - ISO 8601)
-
-GSI: facility_id-status-index
-  Partition Key: facility_id
-  Sort Key: status
-```
-
----
-
-## 9. API Endpoints
-
-### REST API (FastAPI)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/sessions` | Create new patient session |
-| `GET` | `/sessions/{id}` | Get session details |
-| `POST` | `/sessions/{id}/complete` | Mark session as complete, trigger doc generation |
-| `GET` | `/sessions/{id}/qr` | Get QR code for patient |
-| `GET` | `/queue/{facility_id}` | Get current queue for a facility |
-| `POST` | `/queue/{facility_id}/call/{patient_id}` | Call a patient to triage |
-| `GET` | `/triage/{patient_id}` | Get full triage document |
-| `PUT` | `/triage/{patient_id}/ccmu` | Nurse overrides CCMU level |
-
-### WebSocket (FastAPI)
-
-| Route | Direction | Description |
-|-------|-----------|-------------|
-| `/ws/queue/{facility_id}` | Bidirectional | Nurse dashboard real-time queue updates |
-
----
-
-## 10. Security Considerations
-
-1. **Data Encryption**: Clinical table uses AWS KMS customer-managed key
-2. **IAM Isolation**: Separate IAM roles for admin vs. clinical data access
-3. **No PII in Logs**: Backend strips PII before logging
-4. **Session Expiry**: Patient sessions auto-expire after 24 hours
-5. **Nurse Auth**: Cognito user pool with hospital-issued credentials
-6. **GDPR Compliance**: Patient data deletion API, consent recorded at session start
-7. **No data persistence beyond session**: For the MVP, clinical data is session-scoped
-8. **API Key Security**: Mistral API key stored as environment variable, never committed
-
----
-
-## 11. Hackathon Priorities & Tradeoffs
+## 10. Hackathon Priorities
 
 ### Must-Have (MVP)
-- ✅ Voice conversation with patient via ElevenLabs + Voxtral
-- ✅ At least 1 working agent (Agent 1 — Pre-Nurse Diagnostic)
+- ✅ Voice conversation with patient via Nova Sonic 2
+- ✅ Clinical pre-assessment agent (OPQRST + red flags)
+- ✅ DataGouv health data enrichment via MCP
 - ✅ CCMU classification output
-- ✅ Patient kiosk UI (voice + QR code)
-- ✅ Nurse dashboard with patient queue
-- ✅ End-to-end demo flow
+- ✅ Triage document generation
 
 ### Should-Have
-- Agent 2 (DataGouv) with at least 1 working MCP query
-- Agent 3 (Administrative) with structured data collection
-- Real-time WebSocket updates on nurse dashboard
-- QR code → patient queue tracking page
+- Nurse dashboard with patient queue
+- Patient kiosk UI
+- Real-time WebSocket updates
+- QR code → patient queue tracking
 
 ### Nice-to-Have
-- Multiple DataGouv dataset integrations
+- Agent 3 (Administrative data collection)
 - PDF export of triage document
 - Multi-language support
-- Analytics on queue performance
