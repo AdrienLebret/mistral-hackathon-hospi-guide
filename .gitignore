@@ -51,3 +51,6 @@ build/
 # AWS
 .aws-sam/
 samconfig.toml
+
+legacy/code-example/*
+legacy/old-frontend/*
