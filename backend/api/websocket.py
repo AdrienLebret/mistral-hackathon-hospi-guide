@@ -29,7 +29,7 @@ from strands.experimental.bidi.types.events import BidiAudioInputEvent
 logger = logging.getLogger(__name__)
 
 PROMPT_PATH = (
-    Path(__file__).resolve().parent.parent / "agents" / "prompts" / "orchestrator.md"
+    Path(__file__).resolve().parent.parent / "agents" / "prompts" / "orchestrator_en.md"
 )
 
 # Valid server event types per the WebSocket protocol spec
@@ -75,7 +75,7 @@ def _make_nova_sonic_model() -> BidiNovaSonicModel:
     return BidiNovaSonicModel(
         model_id=os.getenv("NOVA_SONIC_MODEL_ID", "amazon.nova-2-sonic-v1:0"),
         provider_config={
-            "audio": {"voice": os.getenv("NOVA_SONIC_VOICE_ID", "tiffany")}
+            "audio": {"voice": os.getenv("NOVA_SONIC_VOICE_ID", "matthew")}
         },
         client_config={"region": os.getenv("AWS_REGION", "us-east-1")},
     )
@@ -117,6 +117,8 @@ class ConnectionManager:
         # Accumulate tool results for triage document compilation
         self._clinical_data: dict = {}
         self._datagouv_data: dict | None = None
+        # Conversation transcripts for fallback summary
+        self._transcripts: list[dict] = []
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -356,6 +358,10 @@ class ConnectionManager:
         text = event.get("text", "")
         is_final = event.get("is_final", False)
 
+        # Save final transcripts for fallback summary building
+        if is_final and text.strip():
+            self._transcripts.append({"role": role, "text": text})
+
         await self._send_json(
             format_event(
                 "textOutput",
@@ -372,25 +378,51 @@ class ConnectionManager:
         """
         tool_use = event.get("current_tool_use", {})
         tool_name = tool_use.get("name", "unknown")
+        tool_status = tool_use.get("status", "running")
 
         # Notify browser that a tool is running
-        await self._send_json(format_event("toolUse", tool=tool_name, status="running"))
+        if tool_status in ("running", "in_progress", None):
+            await self._send_json(
+                format_event("toolUse", tool=tool_name, status="running")
+            )
 
-        # The BidiAgent executes tools automatically in the background.
-        # We capture results via the tool_use event data when available.
-        tool_input = tool_use.get("input", {})
+        # Capture tool output when available (status=complete or result present)
+        tool_result = tool_use.get("result", tool_use.get("output", None))
+        if tool_result is not None:
+            try:
+                if isinstance(tool_result, str):
+                    parsed_result = json.loads(tool_result)
+                else:
+                    parsed_result = tool_result
 
-        # Store tool context for later triage compilation
-        if tool_name == "clinical_assessment":
-            self._clinical_data = tool_input
-        elif tool_name == "query_health_data":
-            self._datagouv_data = tool_input
+                if tool_name == "clinical_assessment":
+                    self._clinical_data = parsed_result
+                    logger.info(
+                        "Captured clinical_assessment result: CCMU=%s",
+                        parsed_result.get("suggested_ccmu", "?"),
+                    )
+                elif tool_name == "query_health_data":
+                    self._datagouv_data = parsed_result
+                    logger.info("Captured query_health_data result")
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                logger.debug("Could not parse tool result for %s", tool_name)
 
-        # Send toolResult event (the agent handles execution internally;
-        # we notify the browser that the tool completed)
-        await self._send_json(
-            format_event("toolResult", tool=tool_name, status="complete")
-        )
+            # Send toolResult event
+            await self._send_json(
+                format_event("toolResult", tool=tool_name, status="complete")
+            )
+        elif tool_status == "complete":
+            # Tool completed but result not in this event — check input as fallback
+            tool_input = tool_use.get("input", {})
+            if isinstance(tool_input, dict) and tool_input:
+                if tool_name == "clinical_assessment" and not self._clinical_data:
+                    self._clinical_data = tool_input
+                elif tool_name == "query_health_data" and self._datagouv_data is None:
+                    self._datagouv_data = tool_input
+
+            await self._send_json(
+                format_event("toolResult", tool=tool_name, status="complete")
+            )
 
     async def handle_tool_use(self, tool_name: str, tool_content: dict) -> dict:
         """Execute a tool and return the result to the BidiAgent.
@@ -435,15 +467,46 @@ class ConnectionManager:
         """Compile the triage document and send a ``sessionEnd`` event.
 
         Called when the BidiAgent's ``stop_conversation`` tool fires.
-        Uses ``compile_triage_document`` from ``backend.triage`` to merge
-        clinical assessment and DataGouv enrichment data.
+        Uses the summarize_transcript agent to build a patient summary
+        from the conversation, then compiles the full triage document.
 
         Returns:
             The compiled triage document as a dict.
         """
         from backend.triage import compile_triage_document
+        from backend.agents.summarize_tool import summarize_transcript
 
         logger.info("Compiling triage document")
+        logger.info("  Transcripts: %d messages", len(self._transcripts))
+        logger.info(
+            "  clinical_data keys: %s",
+            list(self._clinical_data.keys()) if self._clinical_data else "EMPTY",
+        )
+
+        # Always summarize the transcript to get patient-facing data
+        summary = summarize_transcript(self._transcripts)
+        logger.info("  Summary: %s", json.dumps(summary, ensure_ascii=False)[:300])
+
+        # Merge summary into clinical data if clinical data is empty
+        if not self._clinical_data or not self._clinical_data.get("chief_complaint"):
+            self._clinical_data = {
+                "chief_complaint": summary.get("patient_chief_complaint", ""),
+                "opqrst": {},
+                "red_flags": [],
+                "medical_history": summary.get("medical_history", []),
+                "medications": summary.get("medications", []),
+                "allergies": summary.get("allergies", []),
+                "associated_symptoms": summary.get("declared_symptoms", []),
+                "suggested_ccmu": "3",
+                "ccmu_reasoning": "Classification based on conversation transcript",
+                "is_urgent": False,
+            }
+        else:
+            # Even if we have clinical data, enrich with summary
+            if not self._clinical_data.get("associated_symptoms"):
+                self._clinical_data["associated_symptoms"] = summary.get(
+                    "declared_symptoms", []
+                )
 
         triage_json = compile_triage_document(
             clinical_data=self._clinical_data,
@@ -455,6 +518,21 @@ class ConnectionManager:
         except (json.JSONDecodeError, TypeError):
             triage_doc = {"raw": triage_json}
 
+        # Inject summary data directly into the triage doc for the frontend
+        triage_doc["patient_chief_complaint"] = summary.get(
+            "patient_chief_complaint",
+            triage_doc.get("patient_chief_complaint", ""),
+        )
+        if "clinical_assessment" in triage_doc:
+            ca = triage_doc["clinical_assessment"]
+            ca["associated_symptoms"] = summary.get("declared_symptoms", [])
+            if not ca.get("medical_history"):
+                ca["medical_history"] = summary.get("medical_history", [])
+            if not ca.get("medications"):
+                ca["medications"] = summary.get("medications", [])
+            if not ca.get("allergies"):
+                ca["allergies"] = summary.get("allergies", [])
+
         await self._send_json(format_event("sessionEnd", triageDocument=triage_doc))
 
         logger.info(
@@ -462,3 +540,37 @@ class ConnectionManager:
             triage_doc.get("recommended_ccmu", "?"),
         )
         return triage_doc
+
+    def _build_summary_from_transcripts(self) -> dict:
+        """Build a minimal clinical data dict from captured conversation transcripts.
+
+        This is a fallback when tool results are not captured through the
+        BidiAgent event stream. It extracts the patient's messages as the
+        chief complaint and symptom description.
+        """
+        patient_messages = [
+            msg for msg in self._transcripts if msg.get("role") == "user"
+        ]
+        agent_messages = [
+            msg for msg in self._transcripts if msg.get("role") == "agent"
+        ]
+
+        # Use the first patient message as chief complaint
+        chief = patient_messages[0]["text"] if patient_messages else "Not provided"
+
+        # Combine all patient messages as symptom context
+        all_patient_text = " ".join(m["text"] for m in patient_messages)
+
+        return {
+            "chief_complaint": chief,
+            "opqrst": {},
+            "red_flags": [],
+            "medical_history": [],
+            "medications": [],
+            "allergies": [],
+            "associated_symptoms": [],
+            "suggested_ccmu": "3",
+            "ccmu_reasoning": "Classification based on conversation transcript (tool results not captured)",
+            "is_urgent": False,
+            "patient_transcript": all_patient_text,
+        }

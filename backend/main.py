@@ -51,7 +51,7 @@ def _make_nova_sonic_model() -> BidiNovaSonicModel:
     return BidiNovaSonicModel(
         model_id=os.getenv("NOVA_SONIC_MODEL_ID", "amazon.nova-2-sonic-v1:0"),
         provider_config={
-            "audio": {"voice": os.getenv("NOVA_SONIC_VOICE_ID", "tiffany")}
+            "audio": {"voice": os.getenv("NOVA_SONIC_VOICE_ID", "matthew")}
         },
         client_config={"region": os.getenv("AWS_REGION", "us-east-1")},
     )
@@ -93,7 +93,7 @@ async def main() -> None:
     logger.info(
         "Model: %s", os.getenv("NOVA_SONIC_MODEL_ID", "amazon.nova-2-sonic-v1:0")
     )
-    logger.info("Voice: %s", os.getenv("NOVA_SONIC_VOICE_ID", "tiffany"))
+    logger.info("Voice: %s", os.getenv("NOVA_SONIC_VOICE_ID", "matthew"))
     logger.info("Region: %s", os.getenv("AWS_REGION", "us-east-1"))
     logger.info("Tools: clinical_assessment, query_health_data, stop_conversation")
     logger.info("-" * 60)

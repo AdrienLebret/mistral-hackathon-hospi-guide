@@ -79,6 +79,15 @@ export default function TicketView({ ticketData, onReset }: TicketViewProps) {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.5 }}
             >
+                Patient ID: <span className="font-mono font-semibold text-mistral-amber">{ticketData.qrToken.split(':')[0]}</span>
+            </motion.p>
+
+            <motion.p
+                className="text-lg text-slate-400"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.55 }}
+            >
                 Arrival time: <span className="font-semibold text-mistral-amber">{formatArrivalTime(ticketData.arrivalTime)}</span>
             </motion.p>
 

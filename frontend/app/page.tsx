@@ -20,6 +20,7 @@ const WS_URL = 'ws://localhost:8000/ws'
 export default function KioskPage() {
     const { state, dispatch } = useKioskStateMachine()
     const [ticketData, setTicketData] = useState<TicketData | null>(null)
+    const [processingTool, setProcessingTool] = useState<string | null>(null)
 
     // Audio service refs — persist across renders, created lazily
     const captureRef = useRef<AudioCaptureService | null>(null)
@@ -57,10 +58,12 @@ export default function KioskPage() {
                 }
 
                 case 'toolUse':
+                    setProcessingTool(event.tool)
                     dispatch({ type: 'TOOL_RUNNING', tool: event.tool })
                     break
 
                 case 'toolResult':
+                    setProcessingTool(null)
                     dispatch({ type: 'TOOL_COMPLETE', tool: event.tool })
                     break
 
@@ -174,8 +177,9 @@ export default function KioskPage() {
 
     const handleConfirmValidation = useCallback(() => {
         // Generate ticket data before transitioning
+        const patientId = `PAT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`
         const ticket: TicketData = {
-            qrToken: crypto.randomUUID(),
+            qrToken: `${patientId}:${crypto.randomUUID()}`,
             arrivalTime: new Date().toISOString(),
             patientSummary: state.patientSummary ?? {
                 chiefComplaint: '',
@@ -223,6 +227,7 @@ export default function KioskPage() {
                             avatarState={state.avatarState}
                             messages={state.messages}
                             isProcessing={state.isProcessing}
+                            processingTool={processingTool}
                         />
                     )}
                     {state.phase === 'validation' && (
