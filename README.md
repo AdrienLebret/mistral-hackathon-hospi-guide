@@ -1,4 +1,4 @@
-# 🏥 HospiGuide — AI-Powered Emergency Triage Assistant
+# 🏥 Triastral — AI-Powered Emergency Triage Assistant
 
 > **Hackathon Project** — Mistral AI × AWS × ElevenLabs × Data.gouv MCP
 
