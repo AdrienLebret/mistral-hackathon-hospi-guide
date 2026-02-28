@@ -1,10 +1,10 @@
-# CCMU Classification Reference — HospiGuide
+# CCMU Classification Reference — Triastral
 
 ## Overview
 
 The **CCMU** (Classification Clinique des Malades aux Urgences) is the standard triage classification system used across French emergency departments. It was developed to quickly categorize patients by the severity of their clinical condition and the urgency of required care.
 
-HospiGuide uses this classification as the core output of its triage recommendation system.
+Triastral uses this classification as the core output of its triage recommendation system.
 
 ---
 
@@ -87,7 +87,7 @@ HospiGuide uses this classification as the core output of its triage recommendat
 
 ## Decision Support Logic
 
-The HospiGuide system uses the following logic to suggest a CCMU level:
+The Triastral system uses the following logic to suggest a CCMU level:
 
 ```
 IF red_flags contains life-threatening indicators:

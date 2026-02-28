@@ -1,8 +1,8 @@
-# Data Model — HospiGuide
+# Data Model — Triastral
 
 ## Overview
 
-HospiGuide uses three separate DynamoDB tables to enforce data isolation between administrative, clinical, and operational data.
+Triastral uses three separate DynamoDB tables to enforce data isolation between administrative, clinical, and operational data.
 
 ---
 

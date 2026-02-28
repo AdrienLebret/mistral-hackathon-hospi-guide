@@ -1,13 +1,14 @@
-# Architecture Document — HospiGuide
+# Architecture Document — Triastral
 
 ## 1. System Overview
 
-HospiGuide is a multi-agent AI system designed to accelerate emergency department intake and support triage decision-making. The system operates across two user interfaces (patient kiosk and nurse dashboard) connected to an AWS-hosted backend that orchestrates multiple AI agents.
+Triastral is a multi-agent AI system designed to accelerate emergency department intake and support triage decision-making. The system operates across two user interfaces (patient kiosk and nurse dashboard) connected to a Python backend powered by **Strands Agents SDK** that orchestrates multiple AI agents locally using Mistral models directly.
 
 ### Design Principles
 - **Voice-first**: The patient interacts primarily through speech, reducing friction
 - **Data separation**: Clinical and administrative data live in isolated stores
 - **Agent specialization**: Each agent has a single responsibility, orchestrated by a supervisor
+- **Local-first**: Agents run locally via Strands SDK — no managed orchestration service required
 - **Real-time**: The nurse dashboard updates in real-time as new patients complete intake
 - **Decision support, not replacement**: The system recommends a CCMU level; the nurse always has final authority
 
@@ -56,11 +57,40 @@ Patient Arrives
 
 ## 3. Agent Architecture (Detail)
 
+### Architecture Pattern: Agents as Tools (Strands SDK)
+
+Triastral uses the **"Agents as Tools"** pattern from Strands Agents SDK. Each specialized agent is wrapped as a `@tool` function and provided to the Orchestrator Agent. The orchestrator decides when to delegate to each specialist based on the conversation flow.
+
+```
+┌─────────────────────────────────────────────────────┐
+│              ORCHESTRATOR AGENT (AO)                  │
+│         Strands Agent + Mistral Large                 │
+│                                                       │
+│  tools=[                                              │
+│    pre_nurse_diagnostic,    # Agent 1 (@tool)         │
+│    datagouv_health_data,    # Agent 2 (@tool + MCP)   │
+│    admin_file_builder,      # Agent 3 (@tool)         │
+│  ]                                                    │
+└─────────────────────────────────────────────────────┘
+```
+
 ### 3.1 Orchestrator Agent (AO)
 
-**Runtime**: Amazon Bedrock AgentCore  
-**Model**: Mistral Large (via Bedrock)  
+**Runtime**: Strands Agents SDK (local Python process)
+**Model**: Mistral Large (via `MistralModel`)
 **Role**: Conversation manager and agent coordinator
+
+**Implementation**:
+```python
+from strands import Agent
+from strands.models.mistral import MistralModel
+
+orchestrator = Agent(
+    system_prompt=AO_SYSTEM_PROMPT,
+    model=MistralModel(model_id="mistral-large-latest"),
+    tools=[pre_nurse_diagnostic, datagouv_health_data, admin_file_builder],
+)
+```
 
 **Responsibilities**:
 1. Drive the intake conversation through a structured flow:
@@ -89,8 +119,28 @@ START → Greeting
 
 ### 3.2 Agent 1 — Pre-Nurse Diagnostic
 
-**Model**: Mistral Large  
+**Model**: Mistral Large (via `MistralModel`)
 **Role**: Clinical pre-assessment specialist
+
+**Implementation**:
+```python
+from strands import Agent, tool
+from strands.models.mistral import MistralModel
+
+@tool
+def pre_nurse_diagnostic(patient_context: str) -> str:
+    """Conduct a structured clinical pre-assessment based on patient context.
+
+    Args:
+        patient_context: The patient's chief complaint and conversation so far.
+    """
+    agent = Agent(
+        system_prompt=AGENT1_SYSTEM_PROMPT,
+        model=MistralModel(model_id="mistral-large-latest"),
+    )
+    response = agent(patient_context)
+    return str(response)
+```
 
 **Behavior**:
 - Follows a symptom-driven interview protocol
@@ -123,9 +173,36 @@ START → Greeting
 
 ### 3.3 Agent 2 — DataGouv Health Data Tool
 
-**Model**: Mistral Medium (lighter, tool-focused)  
-**Role**: Public health data enrichment  
-**Tools**: MCP Data.gouv connector
+**Model**: Mistral Medium (via `MistralModel`)
+**Role**: Public health data enrichment
+**Tools**: MCP Data.gouv connector (via Strands `MCPClient`)
+
+**Implementation**:
+```python
+from strands import Agent, tool
+from strands.models.mistral import MistralModel
+from strands.tools.mcp import MCPClient
+from mcp import stdio_client, StdioServerParameters
+
+datagouv_mcp = MCPClient(lambda: stdio_client(
+    StdioServerParameters(command="uvx", args=["datagouv-mcp-server"])
+))
+
+@tool
+def datagouv_health_data(clinical_context: str) -> str:
+    """Query public health datasets to enrich patient clinical context with epidemiological data.
+
+    Args:
+        clinical_context: Patient clinical profile for cross-referencing with health data.
+    """
+    agent = Agent(
+        system_prompt=AGENT2_SYSTEM_PROMPT,
+        model=MistralModel(model_id="mistral-medium-latest"),
+        tools=[datagouv_mcp],
+    )
+    response = agent(clinical_context)
+    return str(response)
+```
 
 **Behavior**:
 - Receives the patient's clinical context from AO
@@ -138,7 +215,7 @@ START → Greeting
 
 **MCP Tool Calls**:
 ```python
-# Example MCP queries
+# Example MCP queries (executed by the agent via MCPClient)
 mcp.query("pathologies_prevalence", {
     "department": "75",  # Paris
     "pathology_group": "cardiovascular",
@@ -170,8 +247,28 @@ mcp.query("bdpm_interactions", {
 
 ### 3.4 Agent 3 — Administrative File Builder
 
-**Model**: Mistral Medium  
+**Model**: Mistral Medium (via `MistralModel`)
 **Role**: Administrative data collector
+
+**Implementation**:
+```python
+from strands import Agent, tool
+from strands.models.mistral import MistralModel
+
+@tool
+def admin_file_builder(conversation_context: str) -> str:
+    """Collect and structure patient administrative data (identity, insurance, contacts).
+
+    Args:
+        conversation_context: The conversation so far to extract admin data from.
+    """
+    agent = Agent(
+        system_prompt=AGENT3_SYSTEM_PROMPT,
+        model=MistralModel(model_id="mistral-medium-latest"),
+    )
+    response = agent(conversation_context)
+    return str(response)
+```
 
 **Behavior**:
 - Collects structured administrative information through conversation:
@@ -181,7 +278,7 @@ mcp.query("bdpm_interactions", {
   - Emergency contact
   - Attending physician (médecin traitant)
 - Validates completeness and flags missing fields
-- Stores data in the Admin DynamoDB table
+- Stores data in the Admin database table
 
 **Output** (structured JSON):
 ```json
@@ -216,7 +313,7 @@ The final document generated by the Orchestrator Agent:
 
 ```
 ╔══════════════════════════════════════════════════════════╗
-║           PATIENT TRIAGE DOCUMENT — HospiGuide           ║
+║           PATIENT TRIAGE DOCUMENT — Triastral            ║
 ╠══════════════════════════════════════════════════════════╣
 ║                                                          ║
 ║  Patient: Jean Dupont (M, 53 yo)                        ║
@@ -264,18 +361,19 @@ The final document generated by the Orchestrator Agent:
 
 ---
 
-## 5. AWS Infrastructure
+## 5. Infrastructure
 
-### 5.1 Compute & API
+### 5.1 Backend (Local — Strands Agents)
 
-| Service | Use |
-|---------|-----|
-| **Amazon Bedrock AgentCore** | Host and orchestrate all 4 agents (AO + 3 sub-agents) |
-| **AWS Lambda** | Session management, QR generation, document compilation, queue management |
-| **API Gateway (REST)** | Patient kiosk API, nurse dashboard API |
-| **API Gateway (WebSocket)** | Real-time nurse dashboard updates |
+| Component | Technology | Role |
+|-----------|-----------|------|
+| **Agent Runtime** | Strands Agents SDK (Python) | Multi-agent orchestration via "Agents as Tools" pattern |
+| **Model Provider** | Mistral AI API (`MistralModel`) | LLM inference — Mistral Large & Medium directly |
+| **MCP Integration** | Strands `MCPClient` + stdio transport | Data.gouv public health data enrichment |
+| **API Server** | FastAPI | REST API for frontend-backend communication |
+| **WebSocket** | FastAPI WebSocket | Real-time nurse dashboard updates |
 
-### 5.2 Storage
+### 5.2 Storage (AWS)
 
 | Service | Use |
 |---------|-----|
@@ -298,7 +396,7 @@ The final document generated by the Orchestrator Agent:
 |---------|-----|
 | **AWS Amplify** or **S3 + CloudFront** | Host both React apps |
 
-### 5.5 Infrastructure Diagram (AWS)
+### 5.5 Infrastructure Diagram
 
 ```
                     ┌─────────────┐
@@ -315,26 +413,30 @@ The final document generated by the Orchestrator Agent:
               │                          │
               └────────────┬─────────────┘
                            ▼
-                  ┌─────────────────┐
-                  │  API Gateway    │
-                  │  REST + WSS     │
-                  └────────┬────────┘
-                           │
-          ┌────────────────┼────────────────┐
-          ▼                ▼                 ▼
-   ┌────────────┐  ┌────────────┐   ┌────────────┐
-   │  Lambda:   │  │  Lambda:   │   │  Lambda:   │
-   │  Session   │  │  QR Code   │   │  Queue     │
-   │  Manager   │  │  Generator │   │  Manager   │
-   └──────┬─────┘  └────────────┘   └──────┬─────┘
-          │                                 │
-          ▼                                 ▼
+              ┌──────────────────────┐
+              │  FastAPI Backend     │
+              │  (REST + WebSocket)  │
+              └──────────┬───────────┘
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼               ▼
+   ┌────────────┐ ┌────────────┐ ┌────────────┐
+   │  Session   │ │  QR Code   │ │  Queue     │
+   │  Manager   │ │  Generator │ │  Manager   │
+   └──────┬─────┘ └────────────┘ └──────┬─────┘
+          │                              │
+          ▼                              ▼
    ┌─────────────────────────────────────────────┐
-   │          Amazon Bedrock AgentCore            │
+   │     Strands Agents SDK (Local Python)        │
    │                                              │
-   │   AO ──► Agent 1 (Diag)                     │
-   │      ──► Agent 2 (DataGouv) ──► MCP Server  │
-   │      ──► Agent 3 (Admin)                     │
+   │   AO (Mistral Large)                         │
+   │     ├── @tool pre_nurse_diagnostic           │
+   │     │         (Mistral Large)                │
+   │     ├── @tool datagouv_health_data           │
+   │     │         (Mistral Medium + MCPClient)   │
+   │     │              └── MCP Data.gouv Server  │
+   │     └── @tool admin_file_builder             │
+   │               (Mistral Medium)               │
    └───────────────────┬─────────────────────────┘
                        │
           ┌────────────┼────────────┐
@@ -371,7 +473,7 @@ The final document generated by the Orchestrator Agent:
 **Layout**:
 ```
 ┌──────────────────────────────────────────────────────┐
-│  HospiGuide — Nurse Dashboard           [Nurse Name] │
+│  Triastral — Nurse Dashboard            [Nurse Name] │
 ├──────────────────────────────────────────────────────┤
 │                                                       │
 │  ┌─────────────────────┐  ┌────────────────────────┐ │
@@ -413,7 +515,7 @@ The patient kiosk uses ElevenLabs Conversational AI to create a natural voice in
 ```javascript
 // ElevenLabs agent configuration
 const agentConfig = {
-  agent_id: "hospi-guide-intake",
+  agent_id: "triastral-intake",
   voice: {
     voice_id: "professional_french_female",  // Warm, reassuring voice
     model: "eleven_turbo_v2",
@@ -439,7 +541,7 @@ ElevenLabs captures audio
 Voxtral (Mistral STT) transcribes
     │
     ▼
-Transcript sent to AO (Bedrock AgentCore)
+Transcript sent to AO (Strands Agent, local)
     │
     ▼
 AO generates response text
@@ -460,7 +562,7 @@ Patient hears and responds
 ### 8.1 Admin Table (DynamoDB)
 
 ```
-Table: hospi-guide-admin
+Table: triastral-admin
 Partition Key: patient_id (String)
 Sort Key: session_timestamp (String)
 
@@ -482,7 +584,7 @@ Attributes:
 ### 8.2 Clinical Table (DynamoDB — KMS Encrypted)
 
 ```
-Table: hospi-guide-clinical
+Table: triastral-clinical
 Partition Key: patient_id (String)
 Sort Key: session_timestamp (String)
 
@@ -506,7 +608,7 @@ Attributes:
 ### 8.3 Queue Table (DynamoDB)
 
 ```
-Table: hospi-guide-queue
+Table: triastral-queue
 Partition Key: facility_id (String)
 Sort Key: patient_id (String)
 
@@ -528,7 +630,7 @@ GSI: facility_id-status-index
 
 ## 9. API Endpoints
 
-### REST API
+### REST API (FastAPI)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -541,13 +643,11 @@ GSI: facility_id-status-index
 | `GET` | `/triage/{patient_id}` | Get full triage document |
 | `PUT` | `/triage/{patient_id}/ccmu` | Nurse overrides CCMU level |
 
-### WebSocket API
+### WebSocket (FastAPI)
 
 | Route | Direction | Description |
 |-------|-----------|-------------|
-| `$connect` | Client → Server | Nurse dashboard connects |
-| `queue_update` | Server → Client | New patient added or status changed |
-| `patient_called` | Server → Client | Patient has been called |
+| `/ws/queue/{facility_id}` | Bidirectional | Nurse dashboard real-time queue updates |
 
 ---
 
@@ -555,11 +655,12 @@ GSI: facility_id-status-index
 
 1. **Data Encryption**: Clinical table uses AWS KMS customer-managed key
 2. **IAM Isolation**: Separate IAM roles for admin vs. clinical data access
-3. **No PII in Logs**: Lambda functions strip PII before logging
+3. **No PII in Logs**: Backend strips PII before logging
 4. **Session Expiry**: Patient sessions auto-expire after 24 hours
 5. **Nurse Auth**: Cognito user pool with hospital-issued credentials
 6. **GDPR Compliance**: Patient data deletion API, consent recorded at session start
 7. **No data persistence beyond session**: For the MVP, clinical data is session-scoped
+8. **API Key Security**: Mistral API key stored as environment variable, never committed
 
 ---
 
