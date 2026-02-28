@@ -1,5 +1,5 @@
 # Kiro
-.kiro/*
+# .kiro/*
 # Claude
 .claude/*
 # Python
@@ -23,6 +23,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+.next/
 
 # Environment variables
 .env
