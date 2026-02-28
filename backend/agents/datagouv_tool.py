@@ -11,6 +11,7 @@ Usage as a @tool for the Orchestrator Agent:
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -19,12 +20,16 @@ from strands.models import BedrockModel
 from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamablehttp_client
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
 DATAGOUV_MCP_URL = os.getenv("DATAGOUV_MCP_URL", "https://mcp.data.gouv.fr/mcp")
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "mistral.mistral-large-3-675b-instruct")
+BEDROCK_MODEL_ID = os.getenv(
+    "BEDROCK_MODEL_ID", "mistral.mistral-large-3-675b-instruct"
+)
 BEDROCK_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "datagouv.md"
@@ -68,8 +73,14 @@ def query_health_data(patient_context: str) -> str:
     """
     mcp_client = _make_mcp_client()
 
+    logger.info("=" * 60)
+    logger.info("📊 DATAGOUV TOOL CALLED")
+    logger.info("=" * 60)
+    logger.info("Patient context received:\n%s", patient_context[:500])
+
     with mcp_client:
         tools = mcp_client.list_tools_sync()
+        logger.info("   MCP tools loaded: %d tools available", len(tools))
 
         agent = Agent(
             model=_make_model(),
@@ -84,6 +95,7 @@ def query_health_data(patient_context: str) -> str:
             f"le JSON d'enrichissement."
         )
 
+    logger.info("✅ DataGouv enrichment complete")
     return str(response)
 
 
