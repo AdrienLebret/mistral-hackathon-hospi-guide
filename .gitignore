@@ -1,6 +1,7 @@
 # Kiro
-.kiro/*
-
+# .kiro/*
+# Claude
+.claude/*
 # Python
 __pycache__/
 *.py[cod]
@@ -22,6 +23,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+.next/
 
 # Environment variables
 .env
@@ -50,3 +52,6 @@ build/
 # AWS
 .aws-sam/
 samconfig.toml
+
+legacy/code-example/*
+legacy/old-frontend/*
