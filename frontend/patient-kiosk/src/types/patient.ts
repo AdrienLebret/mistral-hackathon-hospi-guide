@@ -37,6 +37,7 @@ export interface PatientClinical {
   allergies: string[]
   redFlags: string[]
   suggestedCcmu: string
+  ccmuReasoning?: string
 }
 
 /** Full patient record for the kiosk session */

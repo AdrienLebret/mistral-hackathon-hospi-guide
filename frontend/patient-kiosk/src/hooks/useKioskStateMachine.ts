@@ -254,6 +254,7 @@ export function useKioskStateMachine(input: KioskInput): [KioskState, KioskActio
         allergies: (clinical.allergies as string[]) ?? [],
         redFlags: (clinical.redFlags as string[]) ?? [],
         suggestedCcmu: (clinical.suggestedCcmu as string) ?? '',
+        ccmuReasoning: (clinical.ccmuReasoning as string) ?? '',
       }
     }
 

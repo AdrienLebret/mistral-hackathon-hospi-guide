@@ -154,10 +154,9 @@ async def voice_session(websocket: WebSocket):
         except Exception:
             pass
 
-        # ── Final compilation: process full transcript with Mistral ─────
-        # This runs AFTER the conversation ends.  The frontend is already
-        # showing a "Compiling…" loading screen (triggered by the
-        # session.ended event from BidiConnectionCloseEvent in ws_io.py).
+        # ── Final compilation: Claude Haiku clinical sub-agent ────────
+        # Sends transcript to Claude Haiku for OPQRST + CCMU extraction.
+        # Falls back to basic parser if Bedrock is unreachable.
         try:
             transcripts = ws_profile_extractor.get_transcripts()
             if transcripts:
@@ -166,14 +165,17 @@ async def voice_session(websocket: WebSocket):
                     for t in transcripts
                 )
                 logger.info(
-                    "Session %s: running final compilation on %d transcript entries",
+                    "Session %s: compiling patient record from %d transcript entries",
                     session_id,
                     len(transcripts),
                 )
 
-                loop = asyncio.get_running_loop()
+                # Claude API call is blocking (boto3) — run in thread pool
+                import functools
+                loop = asyncio.get_event_loop()
                 compilation = await loop.run_in_executor(
-                    None, run_final_compilation, transcript_text
+                    None,
+                    functools.partial(run_final_compilation, transcript_text),
                 )
 
                 if compilation:
