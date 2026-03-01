@@ -89,9 +89,9 @@ def clinical_assessment(patient_context: str) -> str:
         )
 
         response = agent(
-            f"Voici le contexte patient à évaluer cliniquement :\n\n"
+            f"Here is the patient context for clinical assessment:\n\n"
             f"{patient_context}\n\n"
-            f"Analyse ce contexte et retourne le JSON d'évaluation clinique."
+            f"Analyze this context and return the clinical assessment JSON."
         )
 
         raw = str(response)
@@ -105,21 +105,21 @@ def clinical_assessment(patient_context: str) -> str:
                 {
                     "error": "Agent output is not valid JSON",
                     "raw_output": raw,
-                    "chief_complaint": "Erreur d'analyse",
+                    "chief_complaint": "Analysis error",
                     "opqrst": {
-                        "onset": "Non renseigné",
-                        "provocation": "Non renseigné",
-                        "quality": "Non renseigné",
-                        "region": "Non renseigné",
+                        "onset": "Not provided",
+                        "provocation": "Not provided",
+                        "quality": "Not provided",
+                        "region": "Not provided",
                         "severity": 0,
-                        "timing": "Non renseigné",
+                        "timing": "Not provided",
                     },
                     "medical_history": [],
                     "medications": [],
                     "allergies": [],
                     "red_flags": [],
                     "suggested_ccmu": "3",
-                    "ccmu_reasoning": "Évaluation clinique échouée — classification prudente par défaut",
+                    "ccmu_reasoning": "Clinical assessment failed — cautious default classification",
                     "is_urgent": False,
                 },
                 ensure_ascii=False,
@@ -141,21 +141,21 @@ def clinical_assessment(patient_context: str) -> str:
         return json.dumps(
             {
                 "error": f"Clinical agent failure: {exc}",
-                "chief_complaint": "Erreur d'évaluation",
+                "chief_complaint": "Assessment error",
                 "opqrst": {
-                    "onset": "Non renseigné",
-                    "provocation": "Non renseigné",
-                    "quality": "Non renseigné",
-                    "region": "Non renseigné",
+                    "onset": "Not provided",
+                    "provocation": "Not provided",
+                    "quality": "Not provided",
+                    "region": "Not provided",
                     "severity": 0,
-                    "timing": "Non renseigné",
+                    "timing": "Not provided",
                 },
                 "medical_history": [],
                 "medications": [],
                 "allergies": [],
                 "red_flags": [],
                 "suggested_ccmu": "3",
-                "ccmu_reasoning": "Évaluation clinique échouée — classification prudente par défaut",
+                "ccmu_reasoning": "Clinical assessment failed — cautious default classification",
                 "is_urgent": False,
             },
             ensure_ascii=False,
@@ -168,12 +168,12 @@ def clinical_assessment(patient_context: str) -> str:
 
 if __name__ == "__main__":
     test_context = """
-    Patient: Homme, 67 ans, département 75 (Paris)
-    Motif de consultation: Douleur thoracique depuis ce matin, irradiant vers le bras gauche
-    Symptômes associés: Essoufflement, sueurs
-    Antécédents: Hypertension artérielle, diabète type 2
-    Médicaments actuels: Metformine 1000mg, Amlodipine 5mg
-    Allergies: Aucune connue
+    Patient: Male, 67 years old, Paris area
+    Chief complaint: Chest pain since this morning, radiating to left arm
+    Associated symptoms: Shortness of breath, sweating
+    Medical history: Arterial hypertension, type 2 diabetes
+    Current medications: Metformin 1000mg, Amlodipine 5mg
+    Allergies: None known
     """
     print("=" * 60)
     print("Agent 1 — Clinical Pre-Assessment")

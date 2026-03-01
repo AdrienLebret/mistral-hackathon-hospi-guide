@@ -18,7 +18,7 @@ export function AIInsightsSection({ insights }: AIInsightsSectionProps) {
     <div>
       <div className="flex items-center gap-2 text-sm font-semibold text-slate-300 mb-2">
         <Sparkles size={16} className="text-mistral-amber" />
-        Suggestions IA
+        AI Suggestions
       </div>
 
       <div className="space-y-2">
@@ -28,7 +28,7 @@ export function AIInsightsSection({ insights }: AIInsightsSectionProps) {
       </div>
 
       <p className="text-[10px] text-slate-600 italic mt-2 text-center">
-        Suggestions IA — Aide a la decision uniquement. L'IDE reste seul(e) decisionnaire.
+        AI Suggestions — Decision support only. The nurse remains the sole decision-maker.
       </p>
     </div>
   )

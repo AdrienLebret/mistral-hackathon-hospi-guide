@@ -41,7 +41,7 @@ export function TicketView({ ticketData, onReset }: TicketViewProps) {
 
       {/* Speech */}
       <SpeechBubble
-        message="Merci ! Votre dossier de pre-triage est enregistre. Rendez-vous en salle d'attente."
+        message="Thank you! Your pre-triage file has been registered. Please proceed to the waiting room."
         role="assistant"
       />
 
@@ -54,7 +54,7 @@ export function TicketView({ ticketData, onReset }: TicketViewProps) {
         animate={{ opacity: [1, 0.5, 1] }}
         transition={{ duration: 2, repeat: Infinity }}
       >
-        Retour a l'accueil dans {countdown}s
+        Returning to home in {countdown}s
       </motion.p>
     </motion.div>
   )

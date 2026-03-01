@@ -18,11 +18,11 @@ interface InfoCardSectionProps {
 }
 
 const SECTION_CONFIG: Record<InfoSection, { icon: typeof User; label: string }> = {
-  identite: { icon: User, label: 'Identite' },
-  motif: { icon: AlertCircle, label: 'Motif de consultation' },
-  symptomes: { icon: Activity, label: 'Symptomes' },
-  antecedents: { icon: FileText, label: 'Antecedents' },
-  traitements: { icon: Pill, label: 'Traitements en cours' },
+  identite: { icon: User, label: 'Identity' },
+  motif: { icon: AlertCircle, label: 'Chief Complaint' },
+  symptomes: { icon: Activity, label: 'Symptoms' },
+  antecedents: { icon: FileText, label: 'Medical History' },
+  traitements: { icon: Pill, label: 'Current Medications' },
   allergies: { icon: ShieldAlert, label: 'Allergies' },
 }
 
@@ -34,10 +34,10 @@ function renderContent(section: InfoSection, data: Partial<PatientData>) {
     case 'identite':
       return (
         <div className="space-y-1 text-sm">
-          {identity?.fullName && <p><span className="text-slate-400">Nom :</span> {identity.fullName}</p>}
-          {identity?.dateOfBirth && <p><span className="text-slate-400">DDN :</span> {identity.dateOfBirth}</p>}
-          {identity?.gender && <p><span className="text-slate-400">Sexe :</span> {identity.gender}</p>}
-          {identity?.insuranceType && <p><span className="text-slate-400">Couverture :</span> {identity.insuranceType}</p>}
+          {identity?.fullName && <p><span className="text-slate-400">Name:</span> {identity.fullName}</p>}
+          {identity?.dateOfBirth && <p><span className="text-slate-400">DOB:</span> {identity.dateOfBirth}</p>}
+          {identity?.gender && <p><span className="text-slate-400">Sex:</span> {identity.gender}</p>}
+          {identity?.insuranceType && <p><span className="text-slate-400">Insurance:</span> {identity.insuranceType}</p>}
         </div>
       )
     case 'motif':
@@ -48,11 +48,11 @@ function renderContent(section: InfoSection, data: Partial<PatientData>) {
       const sa = clinical?.symptomAssessment
       return sa ? (
         <div className="space-y-1 text-sm">
-          {sa.onset && <p><span className="text-slate-400">Debut :</span> {sa.onset}</p>}
-          {sa.quality && <p><span className="text-slate-400">Type :</span> {sa.quality}</p>}
-          {sa.region && <p><span className="text-slate-400">Localisation :</span> {sa.region}</p>}
-          {sa.severity != null && <p><span className="text-slate-400">Intensite :</span> {sa.severity}/10</p>}
-          {sa.timing && <p><span className="text-slate-400">Duree :</span> {sa.timing}</p>}
+          {sa.onset && <p><span className="text-slate-400">Onset:</span> {sa.onset}</p>}
+          {sa.quality && <p><span className="text-slate-400">Quality:</span> {sa.quality}</p>}
+          {sa.region && <p><span className="text-slate-400">Location:</span> {sa.region}</p>}
+          {sa.severity != null && <p><span className="text-slate-400">Severity:</span> {sa.severity}/10</p>}
+          {sa.timing && <p><span className="text-slate-400">Duration:</span> {sa.timing}</p>}
           {clinical?.associatedSymptoms && clinical.associatedSymptoms.length > 0 && (
             <div className="flex gap-1.5 flex-wrap mt-1">
               {clinical.associatedSymptoms.map(s => (
@@ -84,7 +84,7 @@ function renderContent(section: InfoSection, data: Partial<PatientData>) {
         <p className="text-sm">
           {clinical?.allergies && clinical.allergies.length > 0
             ? clinical.allergies.join(', ')
-            : 'Aucune allergie connue'}
+            : 'No known allergies'}
         </p>
       )
     default:
@@ -106,7 +106,7 @@ export function InfoCardSection({ section, revealed, patientData, isActive }: In
       <div className={`flex items-center gap-3 px-4 py-3 ${revealed ? 'text-white' : 'text-slate-500'}`}>
         <Icon size={18} className={revealed ? 'text-mistral-orange' : 'text-slate-600'} />
         <span className="font-medium text-sm">{config.label}</span>
-        {!revealed && <span className="ml-auto text-xs text-slate-600">En attente...</span>}
+        {!revealed && <span className="ml-auto text-xs text-slate-600">Pending...</span>}
       </div>
       <AnimatePresence>
         {revealed && (

@@ -10,15 +10,15 @@ export function AdminInfoSection({ identity }: AdminInfoSectionProps) {
   const [open, setOpen] = useState(false)
 
   const rows = [
-    { label: 'Telephone', value: identity.phone },
-    { label: 'Date de naissance', value: identity.dateOfBirth },
-    { label: 'Assurance', value: identity.insuranceType },
-    { label: 'N° SS', value: identity.insuranceNumber },
-    { label: 'Mutuelle', value: identity.mutuelle },
-    { label: 'Contact urgence', value: identity.emergencyContactName },
-    { label: 'Tel. urgence', value: identity.emergencyContactPhone },
-    { label: 'Relation', value: identity.emergencyContactRelation },
-    { label: 'Medecin traitant', value: identity.attendingPhysician },
+    { label: 'Phone', value: identity.phone },
+    { label: 'Date of birth', value: identity.dateOfBirth },
+    { label: 'Insurance', value: identity.insuranceType },
+    { label: 'SSN', value: identity.insuranceNumber },
+    { label: 'Supplemental', value: identity.mutuelle },
+    { label: 'Emergency contact', value: identity.emergencyContactName },
+    { label: 'Emergency phone', value: identity.emergencyContactPhone },
+    { label: 'Relationship', value: identity.emergencyContactRelation },
+    { label: 'Primary physician', value: identity.attendingPhysician },
   ].filter(r => r.value)
 
   if (rows.length === 0) return null
@@ -30,7 +30,7 @@ export function AdminInfoSection({ identity }: AdminInfoSectionProps) {
         className="w-full flex items-center gap-2 p-2.5 text-sm text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors"
       >
         <IdCard size={14} />
-        <span className="font-medium text-xs">Informations administratives</span>
+        <span className="font-medium text-xs">Administrative information</span>
         {open ? <ChevronDown size={14} className="ml-auto" /> : <ChevronRight size={14} className="ml-auto" />}
       </button>
 

@@ -34,7 +34,7 @@ export function InfoCard({ patientData, revealedSections, progress, activeSectio
       <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ClipboardList size={18} className="text-mistral-orange" />
-          <span className="font-semibold text-sm">Fiche Patient</span>
+          <span className="font-semibold text-sm">Patient Record</span>
         </div>
         <span className="text-xs text-slate-400">
           {revealedSections.length}/{ALL_SECTIONS.length} sections

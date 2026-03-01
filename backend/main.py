@@ -17,61 +17,18 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
-from datetime import datetime, timezone
-from pathlib import Path
 
 from strands.experimental.bidi import BidiAgent
 from strands.experimental.bidi.io import BidiAudioIO, BidiTextIO
-from strands.experimental.bidi.models import BidiNovaSonicModel
 from strands.experimental.bidi.tools import stop_conversation
 
 from agents.clinical_agent import clinical_assessment
 from agents.datagouv_tool import query_health_data
+from config import load_prompt, make_nova_sonic_model
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Configuration helpers
-# ---------------------------------------------------------------------------
-
-PROMPT_PATH = Path(__file__).parent / "agents" / "prompts" / "orchestrator.md"
-OUTPUT_DIR = Path(__file__).parent / "output"
-
-
-def _load_prompt() -> str:
-    """Load orchestrator system prompt from markdown file."""
-    return PROMPT_PATH.read_text(encoding="utf-8")
-
-
-def _make_nova_sonic_model() -> BidiNovaSonicModel:
-    """Create Nova Sonic 2 model with configurable voice and region."""
-    return BidiNovaSonicModel(
-        model_id=os.getenv("NOVA_SONIC_MODEL_ID", "amazon.nova-2-sonic-v1:0"),
-        provider_config={
-            "audio": {"voice": os.getenv("NOVA_SONIC_VOICE_ID", "tiffany")}
-        },
-        client_config={"region": os.getenv("AWS_REGION", "us-east-1")},
-    )
-
-
-def _save_triage_document(content: str) -> Path:
-    """Save triage document JSON to the output directory."""
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filepath = OUTPUT_DIR / f"triage_{ts}.json"
-    try:
-        parsed = json.loads(content)
-        filepath.write_text(
-            json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    except (json.JSONDecodeError, ValueError):
-        filepath = OUTPUT_DIR / f"triage_{ts}.txt"
-        filepath.write_text(content, encoding="utf-8")
-    logger.info("📄 Triage document saved to %s", filepath)
-    return filepath
 
 
 # ---------------------------------------------------------------------------
@@ -98,11 +55,11 @@ async def main() -> None:
     logger.info("Tools: clinical_assessment, query_health_data, stop_conversation")
     logger.info("-" * 60)
 
-    model = _make_nova_sonic_model()
+    model = make_nova_sonic_model()
 
     agent = BidiAgent(
         model=model,
-        system_prompt=_load_prompt(),
+        system_prompt=load_prompt(),
         tools=[clinical_assessment, query_health_data, stop_conversation],
     )
 

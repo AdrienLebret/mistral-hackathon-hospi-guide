@@ -8,10 +8,10 @@ interface QueueFiltersProps {
 }
 
 const FILTERS: { key: QueueFilter; label: string }[] = [
-  { key: 'all', label: 'Tous' },
-  { key: 'waiting', label: 'En attente' },
-  { key: 'called', label: 'Appeles' },
-  { key: 'oriented', label: 'Orientes' },
+  { key: 'all', label: 'All' },
+  { key: 'waiting', label: 'Waiting' },
+  { key: 'called', label: 'Called' },
+  { key: 'oriented', label: 'Oriented' },
 ]
 
 export function QueueFilters({ current, onChange, counts }: QueueFiltersProps) {

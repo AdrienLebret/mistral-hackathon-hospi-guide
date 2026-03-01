@@ -7,13 +7,13 @@ interface ClinicalSummarySectionProps {
 }
 
 const OPQRST_LABELS: Record<string, string> = {
-  onset: 'Debut',
+  onset: 'Onset',
   provocation: 'Provocation',
-  palliation: 'Soulagement',
-  quality: 'Qualite',
-  region: 'Localisation',
-  severity: 'Intensite',
-  timing: 'Temporalite',
+  palliation: 'Palliation',
+  quality: 'Quality',
+  region: 'Region',
+  severity: 'Severity',
+  timing: 'Timing',
 }
 
 export function ClinicalSummarySection({ clinical }: ClinicalSummarySectionProps) {
@@ -30,7 +30,7 @@ export function ClinicalSummarySection({ clinical }: ClinicalSummarySectionProps
     <div>
       <div className="flex items-center gap-2 text-sm font-semibold text-slate-300 mb-2">
         <Stethoscope size={16} className="text-mistral-orange" />
-        Resume clinique
+        Clinical Summary
       </div>
 
       {clinical.chiefComplaint && (

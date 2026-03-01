@@ -8,16 +8,16 @@ interface DatagouvObservationsSectionProps {
 export function DatagouvObservationsSection({ context }: DatagouvObservationsSectionProps) {
   const entries = [
     { label: 'Prevalence', value: context.prevalenceContext },
-    { label: 'Comorbidites', value: context.comorbidityFlags },
-    { label: 'Medicaments', value: context.medicationNotes },
-    ...(context.facilityNote ? [{ label: 'Etablissement', value: context.facilityNote }] : []),
+    { label: 'Comorbidities', value: context.comorbidityFlags },
+    { label: 'Medications', value: context.medicationNotes },
+    ...(context.facilityNote ? [{ label: 'Facility', value: context.facilityNote }] : []),
   ]
 
   return (
     <div>
       <div className="flex items-center gap-2 text-sm font-semibold text-slate-300 mb-2">
         <Database size={16} className="text-emerald-400" />
-        Observations Data.gouv
+        Data.gouv Observations
       </div>
 
       <div className="space-y-2">

@@ -20,12 +20,12 @@ export function MedicalContextSection({ clinical }: MedicalContextSectionProps) 
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-sm font-semibold text-slate-300">
         <Heart size={16} className="text-mistral-orange" />
-        Contexte medical
+        Medical Context
       </div>
 
       {history.length > 0 && (
         <div>
-          <p className="text-xs text-slate-500 mb-1">Antecedents</p>
+          <p className="text-xs text-slate-500 mb-1">Medical History</p>
           <div className="flex flex-wrap gap-1.5">
             {history.map(h => (
               <Badge key={h} variant="outline" className="text-[11px]">
@@ -38,7 +38,7 @@ export function MedicalContextSection({ clinical }: MedicalContextSectionProps) 
 
       {surgical.length > 0 && (
         <div>
-          <p className="text-xs text-slate-500 mb-1">Chirurgie</p>
+          <p className="text-xs text-slate-500 mb-1">Surgical History</p>
           <div className="flex flex-wrap gap-1.5">
             {surgical.map(s => (
               <Badge key={s} variant="outline" className="text-[11px]">
@@ -52,7 +52,7 @@ export function MedicalContextSection({ clinical }: MedicalContextSectionProps) 
       {meds.length > 0 && (
         <div>
           <p className="text-xs text-slate-500 mb-1 flex items-center gap-1">
-            <Pill size={12} /> Traitements en cours
+            <Pill size={12} /> Current Medications
           </p>
           <div className="flex flex-wrap gap-1.5">
             {meds.map(m => (

@@ -1,6 +1,9 @@
 import { motion } from 'framer-motion'
+import { Mic } from 'lucide-react'
 import { PixelArtAvatar } from '@/components/avatar/PixelArtAvatar'
 import { Button } from '@/components/ui/button'
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string | undefined
 
 interface WelcomeViewProps {
   onStart: () => void
@@ -31,10 +34,12 @@ export function WelcomeView({ onStart }: WelcomeViewProps) {
       {/* Welcome text */}
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-semibold text-white">
-          Bienvenue aux Urgences
+          Welcome to the Emergency Room
         </h2>
         <p className="text-slate-400 text-base max-w-md">
-          Je suis votre assistant de pre-triage. Je vais vous poser quelques questions pour preparer votre dossier.
+          {BACKEND_URL
+            ? 'I am your voice pre-triage assistant. Press the button to start speaking.'
+            : 'I am your pre-triage assistant. I will ask you a few questions to prepare your file.'}
         </p>
       </div>
 
@@ -48,9 +53,23 @@ export function WelcomeView({ onStart }: WelcomeViewProps) {
           onClick={onStart}
           className="text-xl px-12 py-8 rounded-2xl font-bold shadow-lg shadow-mistral-orange/25"
         >
-          Commencer
+          {BACKEND_URL && <Mic size={24} className="mr-3" />}
+          Start
         </Button>
       </motion.div>
+
+      {/* Voice mode indicator */}
+      {BACKEND_URL && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1 }}
+          className="text-xs text-slate-500 flex items-center gap-1.5"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+          Voice mode active
+        </motion.p>
+      )}
     </motion.div>
   )
 }

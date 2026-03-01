@@ -1,5 +1,5 @@
 /** Phases the kiosk UI can be in */
-export type KioskPhase = 'welcome' | 'conversation' | 'validation' | 'ticket'
+export type KioskPhase = 'welcome' | 'conversation' | 'compiling' | 'validation' | 'ticket'
 
 /** A single message in the AI conversation */
 export interface ConversationMessage {

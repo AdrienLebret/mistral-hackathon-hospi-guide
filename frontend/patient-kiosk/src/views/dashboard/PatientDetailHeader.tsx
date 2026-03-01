@@ -23,7 +23,7 @@ function computeAge(dob: string): number {
 export function PatientDetailHeader({ item }: PatientDetailHeaderProps) {
   const identity = item.patientData.identity
   const age = identity?.dateOfBirth ? computeAge(identity.dateOfBirth) : null
-  const gender = identity?.gender === 'M' ? 'Homme' : identity?.gender === 'F' ? 'Femme' : 'Autre'
+  const gender = identity?.gender === 'M' ? 'Male' : identity?.gender === 'F' ? 'Female' : 'Other'
 
   return (
     <div className="flex items-start justify-between gap-4">
@@ -32,11 +32,11 @@ export function PatientDetailHeader({ item }: PatientDetailHeaderProps) {
         <div className="flex items-center gap-3 text-sm text-slate-400 mt-1">
           <span className="flex items-center gap-1">
             <User size={14} />
-            {age !== null ? `${age} ans` : '?'} — {gender}
+            {age !== null ? `${age} y/o` : '?'} — {gender}
           </span>
           <span className="flex items-center gap-1">
             <Clock size={14} />
-            Attente : <WaitTimer arrivalTime={item.arrivalTime} className="font-medium text-white" />
+            Wait: <WaitTimer arrivalTime={item.arrivalTime} className="font-medium text-white" />
           </span>
         </div>
       </div>

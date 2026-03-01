@@ -19,7 +19,7 @@ export function DetailPanel({ patient, onAssignZone }: DetailPanelProps) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-slate-600">
         <MousePointerClick size={48} className="mb-4" />
-        <p className="text-sm">Selectionnez un patient pour voir les details</p>
+        <p className="text-sm">Select a patient to view details</p>
       </div>
     )
   }

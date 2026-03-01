@@ -2,15 +2,28 @@ import { useMemo } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { createMockDataProvider } from '@/data/mockDataProvider'
 import { useKioskStateMachine } from '@/hooks/useKioskStateMachine'
+import type { KioskInput } from '@/hooks/useKioskStateMachine'
+import { useVoiceSession } from '@/hooks/useVoiceSession'
 import { ParticleEffect } from '@/components/ParticleEffect'
 import { WelcomeView } from '@/views/WelcomeView'
 import { ConversationView } from '@/views/ConversationView'
+import { CompilingView } from '@/views/CompilingView'
 import { ValidationView } from '@/views/ValidationView'
 import { TicketView } from '@/views/TicketView'
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string | undefined
+
 export function KioskPage() {
-  const provider = useMemo(() => createMockDataProvider(), [])
-  const [state, actions] = useKioskStateMachine(provider)
+  const mockProvider = useMemo(() => createMockDataProvider(), [])
+
+  // Voice session is always initialised but only used when BACKEND_URL is set
+  const [voiceState, voiceActions] = useVoiceSession(BACKEND_URL ?? '')
+
+  const kioskInput: KioskInput = BACKEND_URL
+    ? { mode: 'voice', voiceState, voiceActions }
+    : { mode: 'mock', provider: mockProvider }
+
+  const [state, actions] = useKioskStateMachine(kioskInput)
 
   return (
     <div className="relative min-h-screen bg-mistral-dark overflow-hidden">
@@ -23,6 +36,9 @@ export function KioskPage() {
           )}
           {state.phase === 'conversation' && (
             <ConversationView key="conversation" state={state} actions={actions} />
+          )}
+          {state.phase === 'compiling' && (
+            <CompilingView key="compiling" />
           )}
           {state.phase === 'validation' && (
             <ValidationView

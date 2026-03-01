@@ -2,10 +2,8 @@ import { motion } from 'framer-motion'
 import { PixelArtAvatar } from '@/components/avatar/PixelArtAvatar'
 import { SpeechBubble } from '@/components/SpeechBubble'
 import { InfoCard } from '@/components/InfoCard'
-import { CcmuBadge } from '@/components/CcmuBadge'
 import { Button } from '@/components/ui/button'
 import type { KioskState } from '@/hooks/useKioskStateMachine'
-import type { CcmuLevel } from '@/types/ccmu'
 
 interface ValidationViewProps {
   state: KioskState
@@ -16,8 +14,6 @@ interface ValidationViewProps {
 const ALL_SECTIONS = ['identite', 'motif', 'symptomes', 'antecedents', 'traitements', 'allergies'] as const
 
 export function ValidationView({ state, onConfirm, isProcessing }: ValidationViewProps) {
-  const ccmuLevel = (state.patientData.clinical?.suggestedCcmu ?? '2') as CcmuLevel
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -31,18 +27,9 @@ export function ValidationView({ state, onConfirm, isProcessing }: ValidationVie
 
       {/* Speech */}
       <SpeechBubble
-        message="Voici un resume de vos informations. Veuillez verifier que tout est correct avant de valider."
+        message="Here is a summary of your information. Please verify everything is correct before confirming."
         role="assistant"
       />
-
-      {/* CCMU Badge */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 0.3 }}
-      >
-        <CcmuBadge level={ccmuLevel} />
-      </motion.div>
 
       {/* Full info card */}
       <InfoCard
@@ -64,7 +51,7 @@ export function ValidationView({ state, onConfirm, isProcessing }: ValidationVie
           className="flex-1 py-6 text-base"
           disabled
         >
-          Corriger
+          Correct
         </Button>
         <Button
           size="lg"
@@ -72,7 +59,7 @@ export function ValidationView({ state, onConfirm, isProcessing }: ValidationVie
           onClick={onConfirm}
           disabled={isProcessing}
         >
-          {isProcessing ? 'Generation...' : 'Confirmer'}
+          {isProcessing ? 'Generating...' : 'Confirm'}
         </Button>
       </motion.div>
     </motion.div>

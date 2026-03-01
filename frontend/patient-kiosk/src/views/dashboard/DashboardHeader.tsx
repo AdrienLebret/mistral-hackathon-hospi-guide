@@ -18,15 +18,15 @@ export function DashboardHeader({ stats }: DashboardHeaderProps) {
           <span className="bg-gradient-to-r from-mistral-orange to-mistral-amber bg-clip-text text-transparent">
             TRIASTRAL
           </span>
-          <span className="text-slate-500 font-normal text-sm ml-2">Coordinateur IOA</span>
+          <span className="text-slate-500 font-normal text-sm ml-2">Nurse Coordinator</span>
         </h1>
       </div>
 
       <div className="flex items-center gap-6">
         <Stat icon={Users} label="Patients" value={stats.total} color="text-white" />
-        <Stat icon={AlertTriangle} label="Critiques" value={stats.critical} color="text-red-400" />
-        <Stat icon={Clock} label="Attente moy." value={`${stats.avgWaitMin} min`} color="text-amber-400" />
-        <Stat icon={CheckCircle2} label="Orientes" value={stats.oriented} color="text-green-400" />
+        <Stat icon={AlertTriangle} label="Critical" value={stats.critical} color="text-red-400" />
+        <Stat icon={Clock} label="Avg. wait" value={`${stats.avgWaitMin} min`} color="text-amber-400" />
+        <Stat icon={CheckCircle2} label="Oriented" value={stats.oriented} color="text-green-400" />
       </div>
     </header>
   )

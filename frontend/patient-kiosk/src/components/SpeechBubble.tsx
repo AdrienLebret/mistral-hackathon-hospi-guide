@@ -15,24 +15,20 @@ export function SpeechBubble({ message, role, isTyping = false, onTypingComplete
     <AnimatePresence mode="wait">
       <motion.div
         key={message}
-        initial={{ opacity: 0, y: 12, scale: 0.95 }}
+        initial={{ opacity: 0, y: 8, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: -8 }}
-        transition={{ duration: 0.3, ease: 'easeOut' }}
-        className={`relative max-w-lg mx-auto px-5 py-4 rounded-2xl text-base leading-relaxed ${
-          isAssistant
-            ? 'bg-mistral-card border border-slate-700 text-white'
-            : 'bg-mistral-orange/15 border border-mistral-orange/30 text-slate-200'
-        }`}
+        exit={{ opacity: 0, y: -6 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+        className={`flex ${isAssistant ? 'justify-start' : 'justify-end'}`}
       >
-        {/* Tail */}
         <div
-          className={`absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 rotate-45 ${
-            isAssistant ? 'bg-mistral-card border-l border-t border-slate-700' : 'bg-mistral-orange/15 border-l border-t border-mistral-orange/30'
+          className={`max-w-[80%] px-4 py-3 text-sm leading-relaxed ${
+            isAssistant
+              ? 'bg-mistral-card border border-slate-700 text-white rounded-2xl rounded-tl-sm'
+              : 'bg-mistral-orange/15 border border-mistral-orange/30 text-slate-200 rounded-2xl rounded-tr-sm'
           }`}
-        />
-        <div className="relative z-10">
-          <span className="text-xs font-medium uppercase tracking-wider mb-1 block text-slate-400">
+        >
+          <span className="text-[10px] font-medium uppercase tracking-wider mb-0.5 block text-slate-500">
             {isAssistant ? 'Assistant' : 'Patient'}
           </span>
           {isTyping ? (

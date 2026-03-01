@@ -36,7 +36,7 @@ export function QueuePanel({
       <div className="flex-1 overflow-y-auto px-3 space-y-2 pb-4 scrollbar-thin">
         {queue.length === 0 ? (
           <div className="text-center text-slate-500 py-8 text-sm">
-            Aucun patient dans cette categorie
+            No patients in this category
           </div>
         ) : (
           queue.map(item => (

@@ -20,7 +20,7 @@ interface TriageZoneAssignmentProps {
 export function TriageZoneAssignment({ currentZone, onAssign }: TriageZoneAssignmentProps) {
   return (
     <div>
-      <p className="text-sm font-semibold text-slate-300 mb-2">Orientation</p>
+      <p className="text-sm font-semibold text-slate-300 mb-2">Zone Assignment</p>
       <div className="grid grid-cols-5 gap-2">
         {ZONE_ORDER.map(zone => {
           const info = TRIAGE_ZONES[zone]
